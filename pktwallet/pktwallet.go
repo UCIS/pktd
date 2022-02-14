@@ -127,8 +127,13 @@ func walletMain() er.R {
 		}
 	}
 
-	ch := make(chan bool)
-	<-ch
+	buf := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if err != nil || n == 0 {
+			break
+		}
+	}
 
 	log.Info("Shutdown complete")
 	return nil
