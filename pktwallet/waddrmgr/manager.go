@@ -1644,12 +1644,6 @@ func Create(
 		return ErrAlreadyExists.Default()
 	}
 
-	// Ensure the private passphrase is not empty.
-	if len(privPassphrase) == 0 {
-		str := "private passphrase may not be empty"
-		return managerError(ErrEmptyPassphrase, str, nil)
-	}
-
 	// Perform the initial bucket creation and database namespace setup.
 	if err := createManagerNS(ns, ScopeAddrMap); err != nil {
 		return maybeConvertDbError(err)

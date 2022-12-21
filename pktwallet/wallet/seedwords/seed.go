@@ -136,11 +136,12 @@ func (s *SeedEnc) computeCsum() byte {
 	return csum[0]
 }
 
-// If the passphrase is emptystring then cipher() simply copies the content
+// If the passphrase is nil then cipher() simply copies the content
 // from one to the other.
 func cipher(outBytes *[encByteLen]byte, inBytes *[encByteLen]byte, passphrase []byte) {
-	if len(passphrase) == 0 {
+	if passphrase == nil {
 		copy(outBytes[2:], inBytes[2:])
+		return
 	}
 	// bytes 0 and 1 are not enciphered
 	key := argon2.IDKey(
@@ -223,7 +224,7 @@ func (s *Seed) Encrypt(passphrase []byte) *SeedEnc {
 	out := SeedEnc{}
 	cipher(&out.Bytes, &s.seedBin.Bytes, passphrase)
 	out.putVer(seedVersion)
-	out.putE(len(passphrase) > 0)
+	out.putE(passphrase != nil)
 	out.putCsum(out.computeCsum())
 	return &out
 }
