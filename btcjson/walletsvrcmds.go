@@ -472,4 +472,5 @@ func init() {
 	MustRegisterCmd("walletpassphrase", (*WalletPassphraseCmd)(nil), flags)
 	MustRegisterCmd("walletpassphrasechange", (*WalletPassphraseChangeCmd)(nil), flags)
 	MustRegisterCmd("walletmempool", (*WalletMempoolCmd)(nil), flags)
+	MustRegisterCmd("walletislocked", (*WalletIsLockedCmd)(nil), flags)
 }

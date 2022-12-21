@@ -124,5 +124,4 @@ func init() {
 	MustRegisterCmd("listaddresstransactions", (*ListAddressTransactionsCmd)(nil), flags)
 	MustRegisterCmd("listalltransactions", (*ListAllTransactionsCmd)(nil), flags)
 	MustRegisterCmd("recoveraddresses", (*RecoverAddressesCmd)(nil), flags)
-	MustRegisterCmd("walletislocked", (*WalletIsLockedCmd)(nil), flags)
 }
