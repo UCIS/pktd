@@ -291,10 +291,6 @@ func loadConfig() (*config, []string, er.R) {
 		return nil, nil, er.E(err)
 	}
 
-	if cfg.Wallet && !cfg.NoTLS {
-		cfg.TLS = true
-	}
-
 	// Override the RPC certificate if the --wallet flag was specified and
 	// the user did not specify one.
 	if cfg.Wallet && cfg.RPCCert == defaultRPCCertFile {
