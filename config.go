@@ -370,6 +370,8 @@ func loadConfig() (*config, []string, er.R) {
 		AddrIndex:            defaultAddrIndex,
 	}
 
+	cfg.DisableTLS = true
+
 	// Service options which are only added on Windows.
 	serviceOpts := serviceOptions{}
 
