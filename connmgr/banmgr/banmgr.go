@@ -128,9 +128,11 @@ func (b *BanMgr) AddBanScore(host string, persistent, transient uint32, reason s
 		log.Debugf("Misbehaving peer %s: %s and no ban manager yet")
 		return false
 	}
-	b.suspicious[ip] = SuspiciousPeers{
-		banReason:       &reason,
-		dynamicBanScore: &DynamicBanScore{},
+	if _, ok := b.suspicious[ip]; !ok {
+		b.suspicious[ip] = SuspiciousPeers{
+			banReason:       &reason,
+			dynamicBanScore: &DynamicBanScore{},
+		}
 	}
 	warnThreshold := b.config.BanThreashold >> 1
 	if transient == 0 && persistent == 0 {

@@ -457,6 +457,8 @@ func (b *blockManager) handleDonePeerMsg(peers *list.List, sp *ServerPeer) {
 
 	log.Infof("Lost peer [%s]", log.IpAddr(sp.Addr()))
 
+	sp.banMgr.AddBanScore(sp.Addr(), 0, 5, "Disconnected (rapid recon)")
+
 	// Attempt to find a new peer to sync from if the quitting peer is the
 	// sync peer.  Also, reset the header state.
 	if b.SyncPeer() != nil && b.SyncPeer() == sp {
