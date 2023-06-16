@@ -152,7 +152,7 @@ func (b *BanMgr) AddBanScore(host string, persistent, transient uint32, reason s
 		if score > b.config.BanThreashold {
 			log.Warnf("Misbehaving peer %s -- banning and disconnecting", ip)
 			//add to banned
-			b.banned[ip] = BannedPeers{time.Now(), reason}
+			b.banned[ip] = BannedPeers{time.Now().Add(time.Hour), reason}
 			return true
 			//Will be done by the server
 			//sp.server.BanPeer(ip)
