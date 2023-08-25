@@ -1164,6 +1164,12 @@ func (b *BlockChain) initChainState() er.R {
 		cursor := blockIndexBucket.Cursor()
 		for ok := cursor.First(); ok; ok = cursor.Next() {
 			header, status, err := deserializeBlockRow(cursor.Value())
+			if status.KnownInvalid() {
+				// DO NOT EVER STORE INVALID BLOCKS
+				// When the validation logic blows up and ninja-forks we want
+				// to be able to restart the node.
+				continue
+			}
 			if err != nil {
 				return err
 			}
