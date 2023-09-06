@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/pktwallet/waddrmgr"
 	"github.com/pkt-cash/pktd/pktwallet/wallet"
+	"github.com/pkt-cash/pktd/pktwallet/wallet/seedwords"
 )
 
 type RpcFunc struct {
@@ -32,6 +34,8 @@ type RpcFunc struct {
 	res  proto.Message
 	f    func(c *RpcContext, m proto.Message) (proto.Message, er.R)
 }
+
+var hexSeedRegex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 var rpcFunctions []RpcFunc = []RpcFunc{
 	//WalletUnlocker: Wallet unlock
@@ -73,6 +77,35 @@ var rpcFunctions []RpcFunc = []RpcFunc{
 				return nil, er.E(errr)
 			}
 			return resp, nil
+		},
+	},
+	{
+		path: "/api/v1/util/checkseed",
+		req:  (*lnrpc.CheckSeedRequest)(nil),
+		res:  (*lnrpc.CheckSeedResponse)(nil),
+		f: func(c *RpcContext, m proto.Message) (proto.Message, er.R) {
+			req, ok := m.(*lnrpc.CheckSeedRequest)
+			if !ok {
+				return nil, er.New("Argument is not a CheckSeedRequest")
+			}
+			if len(req.SeedWords) == 1 && hexSeedRegex.MatchString(req.SeedWords[0]) {
+				return &lnrpc.CheckSeedResponse{
+					SeedType: lnrpc.SeedType_ST_LEGACY,
+				}, nil
+			}
+			seedEnc, err := seedwords.SeedFromWords(strings.Join(req.SeedWords, " "))
+			if err != nil {
+				return nil, err
+			}
+			if seedEnc.NeedsPassphrase() {
+				return &lnrpc.CheckSeedResponse{
+					SeedType: lnrpc.SeedType_ST_ENCRYPTED,
+				}, nil
+			} else {
+				return &lnrpc.CheckSeedResponse{
+					SeedType: lnrpc.SeedType_ST_UNENCRYPTED,
+				}, nil
+			}
 		},
 	},
 	//MetaService get info

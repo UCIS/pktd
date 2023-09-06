@@ -98,6 +98,20 @@ message GenSeedResponse {
     bytes enciphered_seed = 2;
 }
 
+enum SeedType {
+    ST_LEGACY = 0;
+    ST_ENCRYPTED = 1;
+    ST_UNENCRYPTED = 2;
+}
+
+message CheckSeedResponse {
+    SeedType seed_type = 1;
+}
+
+message CheckSeedRequest {
+    repeated string seed_words = 1;
+}
+
 message InitWalletRequest {
     /*
     wallet_password is the passphrase that should be used to encrypt the
