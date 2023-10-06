@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
+	pkt_pb "github.com/pkt-cash/pktd/generated/proto/pktd_pb"
 	"github.com/pkt-cash/pktd/pktlog/log"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
@@ -76,6 +78,16 @@ var (
 	// electionStateBucketName is the place where all election states for
 	// each block which is or was at some point the tip of the best chain.
 	electionStateBucketName = []byte("electionstate")
+
+	// votesBucketName is where we put the votes cast using the v2.0 election
+	// system. The key is the big endian representation of the block number
+	// and the value is the protobuf pkt_pb.BlockVotes structure.
+	votesBucketName = []byte("votes")
+
+	// balancesBucketName is where we track balances of every address with
+	// coins on it. The key is the address in pkScript format and the value is
+	// the pkt_pb.AddressBalances protobuf structure.
+	balancesBucketName = []byte("balances")
 
 	// byteOrder is the preferred byte order used for serializing numeric
 	// fields for storage in the database.
@@ -826,6 +838,202 @@ func dbPutUtxoView(dbTx database.Tx, view *UtxoViewpoint) er.R {
 	}
 
 	return nil
+}
+
+// -----------------------------------------------------------------------------
+// The addressbalances bucket stores current and recent snapshot of address balances.
+// The keys in this bucket are the addressScript and the values are the serialized
+// balanceInfo.
+// -----------------------------------------------------------------------------
+type addressBalance struct {
+	// The address whose balance we are considering (in pkScript format)
+	addressScript []byte
+	// The balance info for this address, if the address does not exist on chain
+	// or the address has zero balance and has been pruned since the last checkpoint,
+	// then this field will be nil
+	balanceInfo *pkt_pb.AddressBalances
+}
+
+// dbFetchBalances gets the balance info for a list of addresses
+// dbTx: A read or read/write db transactin
+// addressScripts: A list of addresses in pkScript form
+// returns: A list of addressBalance entries for each address
+func dbFetchBalances(dbTx database.Tx, addressScripts [][]byte) ([]addressBalance, er.R) {
+	balancesBucket := dbTx.Metadata().Bucket(balancesBucketName)
+	out := make([]addressBalance, 0, len(addressScripts))
+	for _, addressScript := range addressScripts {
+		balanceInfo := &pkt_pb.AddressBalances{}
+		balances := balancesBucket.Get(addressScript)
+		if balances != nil {
+			if err := proto.Unmarshal(balances, balanceInfo); err != nil {
+				return nil, er.E(err)
+			}
+		}
+		out = append(out, addressBalance{addressScript, balanceInfo})
+	}
+	return out, nil
+}
+
+// dbPutBalances stores a list of address balances.
+// dbTx: A read/write transaction
+// balances: A list of addressBalance objects
+func dbPutBalances(dbTx database.Tx, balances []addressBalance) er.R {
+	balancesBucket := dbTx.Metadata().Bucket(balancesBucketName)
+	for _, bal := range balances {
+		if bal.balanceInfo == nil {
+			if err := balancesBucket.Delete(bal.addressScript); err != nil {
+				return err
+			}
+		} else {
+			bi, err := proto.Marshal(bal.balanceInfo)
+			if err != nil {
+				return er.E(err)
+			}
+			balancesBucket.Put(bal.addressScript, bi)
+		}
+	}
+	return nil
+}
+
+func dbInitBalances(dbTx database.Tx) (uint32, er.R) {
+	buck := dbTx.Metadata().Bucket(balancesBucketName)
+	if buck == nil {
+		log.Infof("Creating address balances in database")
+		if b, err := dbTx.Metadata().CreateBucket(balancesBucketName); err != nil {
+			return 0, err
+		} else {
+			buck = b
+		}
+	}
+	t0 := time.Now()
+	maxBlock := uint32(0)
+	if err := buck.ForEach(func(_, v []byte) er.R {
+		balanceInfo := &pkt_pb.AddressBalances{}
+		if err := proto.Unmarshal(v, balanceInfo); err != nil {
+			return er.E(err)
+		}
+		for _, b := range balanceInfo.Balances {
+			if b.BlockNum > maxBlock {
+				maxBlock = b.BlockNum
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	log.Infof("Scanned address balances in [%d] milliseconds", time.Since(t0).Milliseconds())
+	return maxBlock, nil
+}
+
+func dbDestroyBalances(dbTx database.Tx) er.R {
+	buck := dbTx.Metadata().Bucket(balancesBucketName)
+	if buck == nil {
+		return nil
+	}
+	log.Infof("Deleting address balances from database")
+	return dbTx.Metadata().DeleteBucket(balancesBucketName)
+}
+
+// -----------------------------------------------------------------------------
+// The votes bucket stores stores all voting information for each block that
+// contains votes. The key is the block number in big endian and the value is the
+// pkt_pb.BlockVotes structure.
+// -----------------------------------------------------------------------------
+
+// dbFetchBlockVotes gets all vote information from blocks within a block range
+// dbTx: A database transaction, read-only is ok
+// fromBlock: The first block height in the range to scan for votes in
+// toBlockExcl: The height of the first block to NOT scan for votes in
+// returns: map of block height to vote info, this is a sparse map as blocks with no votes are not stored.
+func dbFetchBlockVotes(dbTx database.Tx, fromBlock, toBlockExcl uint32) (map[uint32]*pkt_pb.BlockVotes, er.R) {
+	buck := dbTx.Metadata().Bucket(votesBucketName)
+	var from [4]byte
+	binary.BigEndian.PutUint32(from[:], fromBlock)
+	out := make(map[uint32]*pkt_pb.BlockVotes)
+	cursor := buck.Cursor()
+	for ok := cursor.Seek(from[:]); ok; ok = cursor.Next() {
+		k := cursor.Key()
+		v := cursor.Value()
+		if len(k) != 4 {
+			return nil, er.Errorf("Internal error: votes table key has length: %d", len(k))
+		}
+		height := binary.BigEndian.Uint32(k)
+		if height >= toBlockExcl {
+			break
+		}
+		bv := &pkt_pb.BlockVotes{}
+		if err := proto.Unmarshal(v, bv); err != nil {
+			return nil, er.Errorf("Internal error: Unable to parse vote table entry at height: [%d]: %s",
+				height, err)
+		}
+		out[height] = bv
+	}
+	return out, nil
+}
+
+// dbInsertBlockVotes puts voting information in the db for a block
+// dbTx: A read/write transaction
+// blockNum: The height of the block which we are storing data for
+// votes: The vote info to store
+func dbInsertBlockVotes(dbTx database.Tx, blockNum uint32, votes *pkt_pb.BlockVotes) er.R {
+	buck := dbTx.Metadata().Bucket(votesBucketName)
+	var bn [4]byte
+	binary.BigEndian.PutUint32(bn[:], blockNum)
+	if buf, err := proto.Marshal(votes); err != nil {
+		return er.Errorf("Internal error: Unable to serialize vote table entry at height: [%d]: %s",
+			blockNum, err)
+	} else {
+		return buck.Put(bn[:], buf)
+	}
+}
+
+// dbPruneBlockVotes deletes all voting information for blocks of height greater
+// than or equal to blockNum. Used when rolling back.
+// dbTx: A read/write transaction
+// blockNum: The height of the first block that should have vote info removed from the db
+// Information for this block AND all blocks higher than this will be removed.
+func dbPruneBlockVotes(dbTx database.Tx, blockNum uint32) er.R {
+	buck := dbTx.Metadata().Bucket(votesBucketName)
+	var from [4]byte
+	binary.BigEndian.PutUint32(from[:], blockNum)
+	cursor := buck.Cursor()
+	for ok := cursor.Seek(from[:]); ok; ok = cursor.Next() {
+		if err := cursor.Delete(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func dbInitBlockVotes(dbTx database.Tx) (uint32, er.R) {
+	buck := dbTx.Metadata().Bucket(votesBucketName)
+	if buck == nil {
+		log.Infof("Creating votes bucket in database")
+		if b, err := dbTx.Metadata().CreateBucket(votesBucketName); err != nil {
+			return 0, err
+		} else {
+			buck = b
+		}
+	}
+	cursor := buck.Cursor()
+	if !cursor.Last() {
+		// No data in votes bucket yet, synced up to 0
+		return 0, nil
+	}
+	k := cursor.Key()
+	if len(k) != 4 {
+		return 0, er.Errorf("Votes bucket contains invalid last key: [%v]", k)
+	}
+	return binary.BigEndian.Uint32(k), nil
+}
+
+func dbDestroyBlockVotes(dbTx database.Tx) er.R {
+	buck := dbTx.Metadata().Bucket(votesBucketName)
+	if buck == nil {
+		return nil
+	}
+	log.Infof("Deleting votes bucket from database")
+	return dbTx.Metadata().DeleteBucket(votesBucketName)
 }
 
 // -----------------------------------------------------------------------------
