@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/arl/statsviz"
+	"github.com/pkt-cash/pktd/blockchain/addressbalance"
 	"github.com/pkt-cash/pktd/blockchain/indexers"
+	"github.com/pkt-cash/pktd/blockchain/votes"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/database"
 	"github.com/pkt-cash/pktd/limits"
@@ -157,6 +159,22 @@ func pktdMain(serverChan chan<- *server) er.R {
 	}
 	if cfg.DropCfIndex {
 		if err := indexers.DropCfIndex(db, interrupt); err != nil {
+			log.Errorf("%v", err)
+			return err
+		}
+
+		return nil
+	}
+	if cfg.DropAddressBalances {
+		if err := addressbalance.Drop(db, interrupt); err != nil {
+			log.Errorf("%v", err)
+			return err
+		}
+
+		return nil
+	}
+	if cfg.DropVotes {
+		if err := votes.Drop(db, interrupt); err != nil {
 			log.Errorf("%v", err)
 			return err
 		}

@@ -9,9 +9,9 @@
 package btcjson
 
 import (
-	"github.com/json-iterator/go"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
 	"github.com/pkt-cash/pktd/btcutil/er"
 
 	"github.com/pkt-cash/pktd/wire"
@@ -853,6 +853,20 @@ func NewEstimateFeeCmd(numBlocks int64) *EstimateFeeCmd {
 	}
 }
 
+// PktdGetAddressBalancesCmd is the input to the "getaddressbalances" endpoint
+type PktdGetAddressBalancesCmd struct {
+	// If not "", then this is the first address that is visited
+	StartingAddress string
+	// If true then return the address balances as of *right now*
+	// If false then return address balances as of last epoch change
+	Current bool
+}
+
+type GetVotesCmd struct {
+	// If specified, then votes will be provided starting from this block height
+	StartingBlock *uint32
+}
+
 func init() {
 	// No special flags for commands in this file.
 	flags := UsageFlag(0)
@@ -865,6 +879,7 @@ func init() {
 	MustRegisterCmd("estimatefee", (*EstimateFeeCmd)(nil), flags)
 	MustRegisterCmd("estimatesmartfee", (*EstimateSmartFeeCmd)(nil), flags)
 	MustRegisterCmd("getaddednodeinfo", (*GetAddedNodeInfoCmd)(nil), flags)
+	MustRegisterCmd("getaddressbalances", (*PktdGetAddressBalancesCmd)(nil), flags)
 	MustRegisterCmd("getbestblockhash", (*GetBestBlockHashCmd)(nil), flags)
 	MustRegisterCmd("getblock", (*GetBlockCmd)(nil), flags)
 	MustRegisterCmd("getblockchaininfo", (*GetBlockChainInfoCmd)(nil), flags)
@@ -890,6 +905,7 @@ func init() {
 	MustRegisterCmd("getnetworkhashps", (*GetNetworkHashPSCmd)(nil), flags)
 	MustRegisterCmd("getpeerinfo", (*GetPeerInfoCmd)(nil), flags)
 	MustRegisterCmd("getrawblocktemplate", (*GetRawBlockTemplateCmd)(nil), flags)
+	MustRegisterCmd("getvotes", (*GetVotesCmd)(nil), flags)
 	MustRegisterCmd("checkpcshare", (*CheckPcShareCmd)(nil), flags)
 	MustRegisterCmd("checkpcann", (*CheckPcAnnCmd)(nil), flags)
 	MustRegisterCmd("getrawmempool", (*GetRawMempoolCmd)(nil), flags)

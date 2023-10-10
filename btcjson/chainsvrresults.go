@@ -540,3 +540,24 @@ type EstimateSmartFeeResult struct {
 	Errors  []string `json:"errors,omitempty"`
 	Blocks  int64    `json:"blocks"`
 }
+
+type AddressBalance struct {
+	Address string  `json:"address"`
+	Balance float64 `json:"balance"`
+}
+
+type PktdGetAddressBalancesResult struct {
+	Balances []AddressBalance `json:"balances"`
+	HasMore  bool             `json:"has_more"`
+}
+
+type NsVote struct {
+	VoterAddress            string `json:"voter_address"`
+	VoteForAddress          string `json:"vote_for_address"`
+	VoterIsWillingCandidate bool   `json:"voter_is_willing_candidate"`
+	InBlockNumber           int    `json:"in_block_number"`
+}
+type NsVotes struct {
+	Votes   []NsVote `json:"votes"`
+	HasMore bool     `json:"has_more"`
+}

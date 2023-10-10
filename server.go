@@ -211,6 +211,8 @@ type server struct {
 	txIndex   *indexers.TxIndex
 	addrIndex *indexers.AddrIndex
 	cfIndex   *indexers.CfIndex
+	balances  *indexers.AddressBalanceIndex
+	votes     *indexers.VotesIndex
 
 	// The fee estimator keeps track of how long transactions are left in
 	// the mempool before they are mined into blocks.
@@ -2614,6 +2616,17 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		log.Info("Committed filter index is enabled")
 		s.cfIndex = indexers.NewCfIndex(db, chainParams)
 		indexes = append(indexes, s.cfIndex)
+	}
+	if cfg.Votes {
+		if !cfg.AddressBalances {
+			log.Infof("Address Balance index enabled because votes are enabled")
+			cfg.AddressBalances = true
+		}
+		s.votes = indexers.NewVotes(db)
+	}
+	if cfg.AddressBalances {
+		log.Info("Address Balances table is enabled")
+		s.balances = indexers.NewAddressBalances(db)
 	}
 
 	// Create an index manager if any of the optional indexes are enabled.

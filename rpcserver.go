@@ -31,9 +31,11 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/pkt-cash/pktd/blockchain"
+	"github.com/pkt-cash/pktd/blockchain/addressbalance"
 	"github.com/pkt-cash/pktd/blockchain/indexers"
 	"github.com/pkt-cash/pktd/blockchain/packetcrypt"
 	"github.com/pkt-cash/pktd/blockchain/packetcrypt/difficulty"
+	"github.com/pkt-cash/pktd/blockchain/votes"
 	"github.com/pkt-cash/pktd/btcec"
 	"github.com/pkt-cash/pktd/btcjson"
 	"github.com/pkt-cash/pktd/btcutil"
@@ -128,6 +130,7 @@ var rpcHandlersBeforeInit = map[string]commandHandler{
 	"estimatesmartfee":       handleEstimateSmartFee,
 	"generate":               handleGenerate,
 	"getaddednodeinfo":       handleGetAddedNodeInfo,
+	"getaddressbalances":     handleGetAddressBalances,
 	"getbestblock":           handleGetBestBlock,
 	"getbestblockhash":       handleGetBestBlockHash,
 	"getblock":               handleGetBlock,
@@ -155,6 +158,7 @@ var rpcHandlersBeforeInit = map[string]commandHandler{
 	"getpeerinfo":            handleGetPeerInfo,
 	"getrawmempool":          handleGetRawMempool,
 	"getrawblocktemplate":    handleGetRawBlockTemplate,
+	"getvotes":               handleGetVotes,
 	"checkpcshare":           handleCheckPcShare,
 	"checkpcann":             handleCheckPcAnn,
 	"getrawtransaction":      handleGetRawTransaction,
@@ -999,6 +1003,89 @@ func handleGetAddedNodeInfo(s *rpcServer, cmd interface{}, closeChan <-chan stru
 		results = append(results, &result)
 	}
 	return results, nil
+}
+
+const addressBalancesPerBatch = 200
+
+func handleGetAddressBalances(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, er.R) {
+	c := cmd.(*btcjson.PktdGetAddressBalancesCmd)
+	var startFrom []byte
+	if c.StartingAddress == "" {
+	} else if a, err := btcutil.DecodeAddress(c.StartingAddress, s.cfg.ChainParams); err != nil {
+		return nil, err
+	} else if pkScript, err := txscript.PayToAddrScript(a); err != nil {
+		return nil, err
+	} else {
+		startFrom = pkScript
+	}
+	snap := s.cfg.Chain.BestSnapshot()
+	epoch := addressbalance.EpochNum(snap.Height)
+	if !c.Current {
+		epoch--
+	}
+	out := make([]btcjson.AddressBalance, 0, addressBalancesPerBatch)
+	if err := s.cfg.DB.View(func(dbTx database.Tx) er.R {
+		i := 0
+		return addressbalance.GetBalances(
+			dbTx,
+			epoch,
+			startFrom,
+			func(ab *addressbalance.AddressBalance) er.R {
+				addr := txscript.PkScriptToAddress(ab.AddressScript, s.cfg.ChainParams)
+				out = append(out, btcjson.AddressBalance{
+					Address: addr.EncodeAddress(),
+					Balance: ab.Balance.ToBTC(),
+				})
+				if i >= addressBalancesPerBatch {
+					return er.LoopBreak
+				}
+				i++
+				return nil
+			},
+		)
+	}); err != nil && err != er.LoopBreak {
+		return nil, err
+	} else {
+		return btcjson.PktdGetAddressBalancesResult{
+			Balances: out,
+			HasMore:  err == er.LoopBreak,
+		}, nil
+	}
+}
+
+const votesPerBatch = 200
+
+func handleGetVotes(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, er.R) {
+	c := cmd.(*btcjson.GetVotesCmd)
+	startFrom := uint32(0)
+	if c.StartingBlock != nil {
+		startFrom = *c.StartingBlock
+	}
+	out := make([]btcjson.NsVote, 0, votesPerBatch)
+	hasMore := false
+	if err := s.cfg.DB.View(func(dbTx database.Tx) er.R {
+		i := 0
+		lastBlock := uint32(0)
+		return votes.GetVotes(dbTx, startFrom, func(nv *votes.NsVote) er.R {
+			out = append(out, btcjson.NsVote{
+				VoterAddress:            txscript.PkScriptToAddress(nv.VoterPkScript, s.cfg.ChainParams).EncodeAddress(),
+				VoteForAddress:          txscript.PkScriptToAddress(nv.VoteForPkScript, s.cfg.ChainParams).EncodeAddress(),
+				VoterIsWillingCandidate: nv.VoterIsWillingCandidate,
+				InBlockNumber:           int(nv.VoteCastInBlock),
+			})
+			if i > votesPerBatch && nv.VoteCastInBlock != lastBlock {
+				hasMore = true
+				return er.LoopBreak
+			}
+			return nil
+		})
+	}); err != nil {
+		return nil, err
+	}
+	return btcjson.NsVotes{
+		Votes:   out,
+		HasMore: hasMore,
+	}, nil
 }
 
 // handleGetBestBlock implements the getbestblock command.
