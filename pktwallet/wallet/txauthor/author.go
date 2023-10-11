@@ -10,6 +10,7 @@ import (
 	"math"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
+	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/txscript/params"
 	"github.com/pkt-cash/pktd/txscript/scriptbuilder"
 	"github.com/pkt-cash/pktd/wire/constants"
@@ -82,6 +83,8 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb btcutil.Amount,
 	targetFee := txrules.FeeForSerializeSize(relayFeePerKb, estimatedSize)
 
 	sweepTo := enough.GetSweepOutput(outputs)
+	log.Debugf("Creating transaction to with amount [%s] and expected fee [%s] sweep=%d",
+		targetAmount.String(), targetFee.String(), sweepTo != nil)
 	for {
 		synthTargetAmount := targetAmount + targetFee
 		if sweepTo != nil {
@@ -91,6 +94,8 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb btcutil.Amount,
 		if err != nil {
 			return nil, err
 		}
+		log.Debugf("Transaction has available [%s] from inputs, target fee is [%s], and target amt is [%s]",
+			inputAmount.String(), targetFee.String(), targetAmount.String())
 		if inputAmount < targetAmount+targetFee {
 			if partialOk && len(outputs) == 1 {
 				targetAmount = 0
@@ -124,6 +129,7 @@ func NewUnsignedTransaction(outputs []*wire.TxOut, relayFeePerKb btcutil.Amount,
 		remainingAmount := inputAmount - targetAmount
 		if remainingAmount < maxRequiredFee {
 			targetFee = maxRequiredFee
+			log.Debugf("Not enough coins to make the input amount with the target amount, retry")
 			continue
 		}
 
