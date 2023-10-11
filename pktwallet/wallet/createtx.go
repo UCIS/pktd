@@ -386,10 +386,6 @@ func (w *Wallet) findEligibleOutputs(
 	maxInputs int,
 ) (eligibleOutputs, int, er.R) {
 	out := eligibleOutputs{}
-	chainClient, err := w.requireChainClient()
-	if err != nil {
-		return out, 0, err
-	}
 	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
 	haveAmounts := make(map[string]*amountCount)
@@ -404,6 +400,7 @@ func (w *Wallet) findEligibleOutputs(
 		addrStrs[a.String()] = struct{}{}
 	}
 
+	var err er.R
 	var visits int
 	if visits, err = w.TxStore.ForEachUnspentOutput(txmgrNs, nil, addrStrs, func(key []byte, uns *dbstructs.Unspent) er.R {
 
@@ -442,16 +439,6 @@ func (w *Wallet) findEligibleOutputs(
 
 		// Locked unspent outputs are skipped.
 		if w.LockedOutpoint(uns.OutPoint) {
-			return nil
-		}
-
-		// If there is an unspent which references a block header which doesn't
-		// actually exist we've got some trouble. Lets make sure before we try to
-		// spend it.
-		if uns.Block.Height < 0 {
-		} else if _, err := chainClient.GetBlockHeader(&uns.Block.Hash); err != nil {
-			log.Debugf("Input [%s] references block hash [%s] which is not in chain, skipping",
-				uns.OutPoint.String(), uns.Block.Hash)
 			return nil
 		}
 

@@ -791,6 +791,19 @@ func (s *Store) ForEachUnspentOutput(
 ) (int, er.R) {
 	var lastKey []byte
 	visits := 0
+	// First get all of the locked out points so that we won't accidentally use one of them
+	var locked map[wire.OutPoint]struct{}
+	lockedTooMany := false
+	forEachLockedOutput(ns, func(op wire.OutPoint, _ LockID, _ time.Time) {
+		if lockedTooMany {
+		} else if len(locked) > 1000 {
+			lockedTooMany = true
+			locked = nil
+		} else {
+			locked[op] = struct{}{}
+		}
+	})
+
 	if err := unspent.ForEachUnspentOutput(ns, beginKey, func(k []byte, uns *dbstructs.Unspent) er.R {
 		lastKey = k
 		visits += 1
@@ -801,8 +814,12 @@ func (s *Store) ForEachUnspentOutput(
 		}
 
 		// Skip the output if it's locked.
-		_, _, isLocked := isLockedOutput(ns, uns.OutPoint, s.clock.Now())
-		if isLocked {
+		if lockedTooMany {
+			_, _, isLocked := isLockedOutput(ns, uns.OutPoint, s.clock.Now())
+			if isLocked {
+				return nil
+			}
+		} else if _, ok := locked[uns.OutPoint]; ok {
 			return nil
 		}
 
