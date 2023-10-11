@@ -391,7 +391,8 @@ func (w *Wallet) findEligibleOutputs(
 	haveAmounts := make(map[string]*amountCount)
 	var winner *amountCount
 
-	var burnedOutputs []wire.OutPoint
+	var outputsToDelete []wire.OutPoint
+	burnedOutputCount := 0
 
 	log.Debugf("Looking for unspents to build transaction")
 
@@ -417,11 +418,19 @@ func (w *Wallet) findEligibleOutputs(
 				return nil
 			} else if txrules.IsBurned(uns, w.chainParams, bs.Height+1440) {
 				log.Tracef("Skipping burned output at height %d", uns.Block.Height)
-				if len(burnedOutputs) < 1_000_000 {
-					burnedOutputs = append(burnedOutputs, uns.OutPoint)
+				if len(outputsToDelete) < 1_000_000 {
+					outputsToDelete = append(outputsToDelete, uns.OutPoint)
+					burnedOutputCount++
 				}
 				return nil
 			}
+		}
+		if uns.Value == 0 {
+			log.Tracef("Skipping zero value output at height [%d]", uns.Block.Height)
+			if len(outputsToDelete) < 1_000_000 {
+				outputsToDelete = append(outputsToDelete, uns.OutPoint)
+			}
+			return nil
 		}
 
 		if minconf > 0 {
@@ -518,10 +527,11 @@ func (w *Wallet) findEligibleOutputs(
 
 	log.Debugf("Got unspents")
 
-	if len(burnedOutputs) > 0 {
+	if len(outputsToDelete) > 0 {
 		wtxmgrBucket := dbtx.ReadWriteBucket(wtxmgrNamespaceKey)
-		log.Infof("Deleting [%s] burned coins", log.Int(len(burnedOutputs)))
-		for _, op := range burnedOutputs {
+		log.Infof("Deleting [%s] burned outputs and [%s] zero-value outputs",
+			log.Int(burnedOutputCount), log.Int(len(outputsToDelete)-burnedOutputCount))
+		for _, op := range outputsToDelete {
 			if err := unspent.Delete(wtxmgrBucket, &op); err != nil {
 				return out, visits, err
 			}
