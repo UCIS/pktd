@@ -2623,10 +2623,12 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 			cfg.AddressBalances = true
 		}
 		s.votes = indexers.NewVotes(db)
+		indexes = append(indexes, s.votes)
 	}
 	if cfg.AddressBalances {
 		log.Info("Address Balances table is enabled")
 		s.balances = indexers.NewAddressBalances(db)
+		indexes = append(indexes, s.balances)
 	}
 
 	// Create an index manager if any of the optional indexes are enabled.
