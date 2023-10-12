@@ -10,10 +10,7 @@ import (
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/btcutil/util/tmap"
-	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/database"
-	"github.com/pkt-cash/pktd/pktlog/log"
-	"github.com/pkt-cash/pktd/txscript"
 )
 
 type AddressBalanceIndex struct {
@@ -99,12 +96,6 @@ func (abi *AddressBalanceIndex) DisconnectBlock(
 	// Invert everything since we're removing the block
 	tmap.ForEach(bc, func(k *addressbalance.BalanceChange, v *struct{}) er.R {
 		k.Diff = -k.Diff
-		return nil
-	})
-	tmap.ForEach(bc, func(key *addressbalance.BalanceChange, _ *struct{}) er.R {
-		addr := txscript.PkScriptToAddress(key.AddressScr, &chaincfg.PktMainNetParams)
-		log.Debugf("Address [%s] changed by [%d] in block [%d]",
-			addr.EncodeAddress(), key.Diff, block.Height())
 		return nil
 	})
 	if err := addressbalance.UpdateBalances(tx, uint32(block.Height())-1, bc); err != nil {

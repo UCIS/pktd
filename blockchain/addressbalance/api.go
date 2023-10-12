@@ -6,7 +6,10 @@ import (
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/btcutil/util/tmap"
+	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/database"
+	"github.com/pkt-cash/pktd/pktlog/log"
+	"github.com/pkt-cash/pktd/txscript"
 )
 
 // A change of balance of an address
@@ -35,6 +38,9 @@ func UpdateBalances(
 	scr := make([][]byte, 0, tmap.Len(changes))
 	amts := make([]int64, 0, tmap.Len(changes))
 	tmap.ForEach(changes, func(c *BalanceChange, _ *struct{}) er.R {
+		addr := txscript.PkScriptToAddress(c.AddressScr, &chaincfg.PktMainNetParams)
+		log.Debugf("Address [%s] changed by [%d] in block [%d]",
+			addr.EncodeAddress(), c.Diff, blockNum)
 		scr = append(scr, c.AddressScr)
 		amts = append(amts, c.Diff)
 		return nil
