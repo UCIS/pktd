@@ -853,7 +853,7 @@ func NewEstimateFeeCmd(numBlocks int64) *EstimateFeeCmd {
 	}
 }
 
-// PktdGetAddressBalancesCmd is the input to the "getaddressbalances" endpoint
+// PktdGetAddressBalancesCmd is the input to the "listaddressbalances" endpoint
 type PktdGetAddressBalancesCmd struct {
 	// If not "", then this is the first address that is visited
 	StartingAddress string
@@ -879,7 +879,7 @@ func init() {
 	MustRegisterCmd("estimatefee", (*EstimateFeeCmd)(nil), flags)
 	MustRegisterCmd("estimatesmartfee", (*EstimateSmartFeeCmd)(nil), flags)
 	MustRegisterCmd("getaddednodeinfo", (*GetAddedNodeInfoCmd)(nil), flags)
-	MustRegisterCmd("getaddressbalances", (*PktdGetAddressBalancesCmd)(nil), flags)
+	MustRegisterCmd("listaddressbalances", (*PktdGetAddressBalancesCmd)(nil), flags)
 	MustRegisterCmd("getbestblockhash", (*GetBestBlockHashCmd)(nil), flags)
 	MustRegisterCmd("getblock", (*GetBlockCmd)(nil), flags)
 	MustRegisterCmd("getblockchaininfo", (*GetBlockChainInfoCmd)(nil), flags)
