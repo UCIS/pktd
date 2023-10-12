@@ -10,7 +10,10 @@ import (
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/btcutil/util/tmap"
+	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/database"
+	"github.com/pkt-cash/pktd/pktlog/log"
+	"github.com/pkt-cash/pktd/txscript"
 )
 
 type AddressBalanceIndex struct {
@@ -37,7 +40,19 @@ func (abi *AddressBalanceIndex) Create(dbTx database.Tx) er.R {
 	return nil
 }
 
+var followScript addressbalance.BalanceChange
+
 func (abi *AddressBalanceIndex) Init() er.R {
+	if addr, e := btcutil.DecodeAddress("pGsZXFt5d7WZhgWbXTY1VtfdicfCJ9Q3Hs", &chaincfg.PktMainNetParams); e != nil {
+		panic(e)
+	} else if addr, e := txscript.PayToAddrScript(addr); e != nil {
+		panic(e)
+	} else {
+		followScript = addressbalance.BalanceChange{
+			AddressScr: addr,
+			Diff:       0,
+		}
+	}
 	return abi.db.Update(func(tx database.Tx) er.R {
 		return abi.Create(tx)
 	})
@@ -98,6 +113,10 @@ func (abi *AddressBalanceIndex) DisconnectBlock(
 		k.Diff = -k.Diff
 		return nil
 	})
+	if key, _ := tmap.GetEntry(bc, &followScript); key != nil {
+		log.Debugf("Address pGsZXFt5d7WZhgWbXTY1VtfdicfCJ9Q3Hs changed by [%d] in block [%d]",
+			key.Diff, block.Height())
+	}
 	if err := addressbalance.UpdateBalances(tx, uint32(block.Height())-1, bc); err != nil {
 		return err
 	}

@@ -44,6 +44,14 @@ func Insert[K, V any](s *Map[K, V], k *K, v *V) (*K, *V) {
 	return nil, nil
 }
 
+func GetEntry[K, V any](s *Map[K, V], k *K) (*K, *V) {
+	if n, ok := s.tm.Ceiling(k); ok && s.comp(k, n.Key.(*K)) == 0 {
+		return n.Key.(*K), n.Value.(*V)
+	} else {
+		return nil, nil
+	}
+}
+
 func Len[K, V any](s *Map[K, V]) int {
 	return s.tm.Size()
 }
