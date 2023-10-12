@@ -1043,12 +1043,12 @@ func handleGetAddressBalances(s *rpcServer, cmd interface{}, closeChan <-chan st
 				return nil
 			},
 		)
-	}); err != nil && err != er.LoopBreak {
+	}); err != nil && !er.IsLoopBreak(err) {
 		return nil, err
 	} else {
 		return btcjson.PktdGetAddressBalancesResult{
 			Balances: out,
-			HasMore:  err == er.LoopBreak,
+			HasMore:  er.IsLoopBreak(err),
 		}, nil
 	}
 }
