@@ -3,6 +3,7 @@ package addressbalance
 import (
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/chaincfg"
+	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/txscript"
 )
 
@@ -67,6 +68,10 @@ func applyBalanceChange(
 			mostRecentBal.balance, mostRecentBal.blockNum, change, nb)
 	}
 	newEntry.balance = uint64(nb)
+
+	addr := txscript.PkScriptToAddress(balance.addressScript, &chaincfg.PktMainNetParams)
+	log.Debugf("Address [%s] changed by [%d] ([%d] -> [%d]) in block [%d]",
+		addr.EncodeAddress(), change/(1<<30), mostRecentBal.balance/(1<<30), newEntry.balance/(1<<30), blockNum)
 
 	keep = append(keep, newEntry)
 	balance.balanceInfo = keep

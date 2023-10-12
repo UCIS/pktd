@@ -59,17 +59,21 @@ func getBlockChanges(
 	}
 	for _, tx := range block.Transactions() {
 		for _, out := range tx.MsgTx().TxOut {
-			insert(&addressbalance.BalanceChange{
-				AddressScr: out.PkScript,
-				Diff:       out.Value,
-			})
+			if out.Value > 0 {
+				insert(&addressbalance.BalanceChange{
+					AddressScr: out.PkScript,
+					Diff:       out.Value,
+				})
+			}
 		}
 	}
 	for _, sp := range spent {
-		insert(&addressbalance.BalanceChange{
-			AddressScr: sp.PkScript,
-			Diff:       -sp.Amount,
-		})
+		if sp.Amount > 0 {
+			insert(&addressbalance.BalanceChange{
+				AddressScr: sp.PkScript,
+				Diff:       -sp.Amount,
+			})
+		}
 	}
 	return bcs
 }

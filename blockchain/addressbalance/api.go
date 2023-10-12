@@ -38,9 +38,6 @@ func UpdateBalances(
 	scr := make([][]byte, 0, tmap.Len(changes))
 	amts := make([]int64, 0, tmap.Len(changes))
 	tmap.ForEach(changes, func(c *BalanceChange, _ *struct{}) er.R {
-		addr := txscript.PkScriptToAddress(c.AddressScr, &chaincfg.PktMainNetParams)
-		log.Debugf("Address [%s] changed by [%d] in block [%d]",
-			addr.EncodeAddress(), c.Diff, blockNum)
 		scr = append(scr, c.AddressScr)
 		amts = append(amts, c.Diff)
 		return nil
@@ -50,6 +47,9 @@ func UpdateBalances(
 		return err
 	}
 	for i := 0; i < len(amts); i++ {
+		addr := txscript.PkScriptToAddress(balances[i].addressScript, &chaincfg.PktMainNetParams)
+		log.Debugf("Address [%s] changed by [%d] in block [%d]",
+			addr.EncodeAddress(), c.Diff, blockNum)
 		if err := applyBalanceChange(&balances[i], amts[i], blockNum); err != nil {
 			return err
 		}
