@@ -29,7 +29,7 @@ func dbGetVotes(dbTx database.Tx, startBlock uint32, handler func(*NsVote) er.R)
 		if v, err := decodeVote(c.Key(), c.Value()); err != nil {
 			return err
 		} else if err := handler(v); err != nil {
-			if err != er.LoopBreak {
+			if !er.IsLoopBreak(err) {
 				return err
 			} else {
 				return nil

@@ -23,7 +23,7 @@ func ForEach[K, V any](s *Map[K, V], f func(k *K, v *V) er.R) er.R {
 	it := s.tm.Iterator()
 	for it.Next() {
 		if err := f(it.Key().(*K), it.Value().(*V)); err != nil {
-			if err == er.LoopBreak {
+			if er.IsLoopBreak(err) {
 				return nil
 			} else {
 				return err
