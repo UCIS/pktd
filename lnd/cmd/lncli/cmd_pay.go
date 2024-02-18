@@ -577,7 +577,7 @@ func (a *aliasCache) get(pubkey string) string {
 	resp, err := a.client.GetNodeInfo(
 		context.Background(),
 		&lnrpc.NodeInfoRequest{
-			PubKey: pubkey,
+			PubKey: []byte(pubkey),
 		},
 	)
 	if err != nil {

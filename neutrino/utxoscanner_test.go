@@ -1,13 +1,13 @@
 package neutrino
 
 import (
-	"errors"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
+	"github.com/pkt-cash/pktd/pktlog/log"
 
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/gcs"
@@ -438,6 +438,8 @@ func TestUtxoScannerScanAddBlocks(t *testing.T) {
 // requests, as well as the scanners ability to exit and cancel request when
 // stopped during a batch scan.
 func TestUtxoScannerCancelRequest(t *testing.T) {
+	log.Debugf(">>>>> Running test TestUtxoScannerCancelRequest()")
+
 	mockChainClient := NewMockChainClient()
 
 	block100000Hash := Block100000.BlockHash()
@@ -445,7 +447,7 @@ func TestUtxoScannerCancelRequest(t *testing.T) {
 	mockChainClient.SetBlock(&block100000Hash, btcutil.NewBlock(&Block100000))
 	mockChainClient.SetBestSnapshot(&block100000Hash, 100000)
 
-	fetchErr := errors.New("cannot fetch block")
+	//fetchErr := errors.New("cannot fetch block")
 
 	// Create a mock function that will block when the utxoscanner tries to
 	// retrieve a block from the network. It will return fetchErr when it
@@ -455,7 +457,8 @@ func TestUtxoScannerCancelRequest(t *testing.T) {
 		GetBlock: func(chainhash.Hash, ...QueryOption,
 		) (*btcutil.Block, er.R) {
 			<-block
-			return nil, er.E(fetchErr)
+			//return nil, er.E(fetchErr)
+			return nil, er.LoopBreak
 		},
 		GetBlockHash:       mockChainClient.GetBlockHash,
 		BestSnapshot:       mockChainClient.BestSnapshot,

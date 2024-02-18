@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"time"
 
+	"github.com/pkt-cash/pktd/blockchain/votecompute/votes"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/lnd/clock"
 	"github.com/pkt-cash/pktd/pktlog/log"
@@ -20,6 +21,9 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/unspent"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/utilfun"
 	"github.com/pkt-cash/pktd/wire"
 )
 
@@ -65,25 +69,18 @@ var (
 		"output unlock not alowed")
 )
 
-// Block contains the minimum amount of data to uniquely identify any block on
-// either the best or side chain.
-type Block struct {
-	Hash   chainhash.Hash
-	Height int32
-}
-
 // BlockMeta contains the unique identification for a block and any metadata
 // pertaining to the block.  At the moment, this additional metadata only
 // includes the block time from the block header.
 type BlockMeta struct {
-	Block
+	dbstructs.Block
 	Time time.Time
 }
 
 // blockRecord is an in-memory representation of the block record saved in the
 // database.
 type blockRecord struct {
-	Block
+	dbstructs.Block
 	Time         time.Time
 	transactions []chainhash.Hash
 }
@@ -94,7 +91,7 @@ type blockRecord struct {
 // instead.
 type incidence struct {
 	txHash chainhash.Hash
-	block  Block
+	block  dbstructs.Block
 }
 
 // indexedIncidence records the transaction incidence and an input or output
@@ -107,7 +104,7 @@ type indexedIncidence struct {
 // credit describes a transaction output which was or is spendable by wallet.
 type credit struct {
 	outPoint wire.OutPoint
-	block    Block
+	block    dbstructs.Block
 	amount   btcutil.Amount
 	change   bool
 	spentBy  indexedIncidence // Index == ^uint32(0) if unspent
@@ -204,6 +201,23 @@ func Create(ns walletdb.ReadWriteBucket) er.R {
 	return createStore(ns)
 }
 
+func getVote(rec *TxRecord, block *BlockMeta, chainParams *chaincfg.Params) *DbNsVote2 {
+	for _, output := range rec.MsgTx.TxOut {
+		if output.Value != 0 {
+			continue
+		}
+		if v := votes.GetVote(output.PkScript); v != nil {
+			return &DbNsVote2{
+				IsCandidate: v.VoterIsWillingCandidate,
+				VoteFor:     txscript.PkScriptToAddress(v.VoteForPkScript, chainParams).String(),
+				VoteTxid:    rec.Hash.String(),
+				VoteBlock:   block.Height,
+			}
+		}
+	}
+	return nil
+}
+
 // updateMinedBalance updates the mined balance within the store, if changed,
 // after processing the given transaction record.
 func (s *Store) updateMinedBalance(ns walletdb.ReadWriteBucket, rec *TxRecord,
@@ -220,9 +234,14 @@ func (s *Store) updateMinedBalance(ns walletdb.ReadWriteBucket, rec *TxRecord,
 
 	spentByAddress := map[string]btcutil.Amount{}
 
+	vote := getVote(rec, block, s.chainParams)
+
 	for i, input := range rec.MsgTx.TxIn {
-		unspentKey, credKey := existsUnspent(ns, &input.PreviousOutPoint)
-		if credKey == nil {
+		uns, err := unspent.Get(ns, &input.PreviousOutPoint)
+		if err != nil {
+			return err
+		}
+		if uns == nil {
 			// Debits for unmined transactions are not explicitly
 			// tracked.  Instead, all previous outputs spent by any
 			// unmined transaction are added to a map for quick
@@ -242,16 +261,19 @@ func (s *Store) updateMinedBalance(ns walletdb.ReadWriteBucket, rec *TxRecord,
 			continue
 		}
 
-		prevAddr := "unknown"
+		prevAddrStr := "unknown"
+		var prevAddr btcutil.Address
 		if prevPk, err := AddressForOutPoint(ns, &input.PreviousOutPoint); err != nil {
 			log.Warnf("Error decoding address spent from because [%s]", err.String())
 		} else if prevPk != nil {
-			prevAddr = txscript.PkScriptToAddress(prevPk, s.chainParams).String()
+			prevAddr = txscript.PkScriptToAddress(prevPk, s.chainParams)
+			prevAddrStr = prevAddr.String()
 		}
 
 		// If this output is relevant to us, we'll mark the it as spent
 		// and remove its amount from the store.
 		spender.index = uint32(i)
+		credKey := utilfun.CreditKeyForUnspent(uns)
 		amt, err := spendCredit(ns, credKey, &spender)
 		if err != nil {
 			return err
@@ -262,10 +284,32 @@ func (s *Store) updateMinedBalance(ns walletdb.ReadWriteBucket, rec *TxRecord,
 		if err != nil {
 			return err
 		}
-		if err := deleteRawUnspent(ns, unspentKey); err != nil {
+		if err := unspent.Delete(ns, &input.PreviousOutPoint); err != nil {
 			return err
 		}
-		spentByAddress[prevAddr] += amt
+		if vote != nil {
+			if prevAddr != nil {
+				if err := putAddressNsVote(ns, prevAddr, vote); err != nil {
+					return err
+				}
+				candidate := ""
+				if vote.IsCandidate {
+					candidate = "+CANDIDATE"
+				}
+				log.Infof("🗳️ %s [%s%s] from [%s] tx [%s] @ [%s]",
+					log.GreenBg("Confirmed vote"),
+					log.Address(vote.VoteFor),
+					candidate,
+					log.Address(prevAddrStr),
+					log.Txid(rec.Hash.String()),
+					log.Height(block.Height))
+			} else {
+				log.Warnf("Unable to store vote from [%s] because prev address is not known",
+					rec.Hash)
+			}
+			vote = nil
+		}
+		spentByAddress[prevAddrStr] += amt
 	}
 
 	for addr, amt := range spentByAddress {
@@ -285,7 +329,7 @@ func (s *Store) updateMinedBalance(ns walletdb.ReadWriteBucket, rec *TxRecord,
 // NOTE: This should only be used once the transaction has been mined.
 func (s *Store) deleteUnminedTx(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R {
 	for i := range rec.MsgTx.TxOut {
-		k := canonicalOutPoint(&rec.Hash, uint32(i))
+		k := utilfun.CanonicalOutPoint(&rec.Hash, uint32(i))
 		if err := deleteRawUnminedCredit(ns, k); err != nil {
 			return err
 		}
@@ -464,11 +508,13 @@ func (s *Store) addCredit(ns walletdb.ReadWriteBucket, rec *TxRecord, block *Blo
 		// If the outpoint that we should mark as credit already exists
 		// within the store, either as unconfirmed or confirmed, then we
 		// have nothing left to do and can exit.
-		k := canonicalOutPoint(&rec.Hash, index)
+		k := utilfun.CanonicalOutPoint(&rec.Hash, index)
 		if existsRawUnminedCredit(ns, k) != nil {
 			return false, nil
 		}
-		if existsRawUnspent(ns, k) != nil {
+		if uns, err := unspent.Get(ns, &wire.OutPoint{Hash: rec.Hash, Index: index}); err != nil {
+			return false, err
+		} else if uns != nil {
 			return false, nil
 		}
 		v := valueUnminedCredit(btcutil.Amount(rec.MsgTx.TxOut[index].Value), change)
@@ -500,13 +546,21 @@ func (s *Store) addCredit(ns walletdb.ReadWriteBucket, rec *TxRecord, block *Blo
 		return false, err
 	}
 
-	return true, putUnspent(ns, &cred.outPoint, &block.Block)
+	txo := rec.MsgTx.TxOut[index]
+	return true, unspent.Put(ns, &dbstructs.Unspent{
+		OutPoint:     cred.outPoint,
+		Block:        block.Block,
+		Address:      txscript.PkScriptToAddress(txo.PkScript, s.chainParams).String(),
+		Value:        txo.Value,
+		FromCoinBase: blockchain.IsCoinBaseTx(&rec.MsgTx),
+		PkScript:     txo.PkScript,
+	})
 }
 
 func rollbackTransaction(
 	ns walletdb.ReadWriteBucket,
 	txHash *chainhash.Hash,
-	block *Block,
+	block *dbstructs.Block,
 	params *chaincfg.Params,
 ) (coins btcutil.Amount, err er.R) {
 	coins = btcutil.Amount(0)
@@ -544,10 +598,12 @@ func rollbackTransaction(
 				log.Txid(rec.Hash.String()))
 
 			// Delete the unspents from this coinbase
-			unspentKey, credKey := existsUnspent(ns, &op)
-			if credKey != nil {
+			if uns, e := unspent.Get(ns, &op); e != nil {
+				err = e
+				return
+			} else if uns != nil {
 				coins -= btcutil.Amount(output.Value)
-				if err = deleteRawUnspent(ns, unspentKey); err != nil {
+				if err = unspent.Delete(ns, &op); err != nil {
 					return
 				}
 			}
@@ -562,7 +618,7 @@ func rollbackTransaction(
 			// going to be properly rolled back. But if there *unmined* transactions
 			// in the mempool which spent these outputs, then we'd better clear them
 			// out because otherwise we will just keep broadcasting them forever.
-			opKey := canonicalOutPoint(&op.Hash, op.Index)
+			opKey := utilfun.CanonicalOutPoint(&op.Hash, op.Index)
 			unminedSpendTxHashKeys := fetchUnminedInputSpendTxHashes(ns, opKey)
 			for _, unminedSpendTxHashKey := range unminedSpendTxHashKeys {
 				unminedVal := existsRawUnmined(ns, unminedSpendTxHashKey[:])
@@ -607,7 +663,7 @@ func rollbackTransaction(
 	unspentByAddress := map[string]btcutil.Amount{}
 	for i, input := range rec.MsgTx.TxIn {
 		prevOut := &input.PreviousOutPoint
-		prevOutKey := canonicalOutPoint(&prevOut.Hash,
+		prevOutKey := utilfun.CanonicalOutPoint(&prevOut.Hash,
 			prevOut.Index)
 		if err = putRawUnminedInput(ns, prevOutKey, rec.Hash[:]); err != nil {
 			return
@@ -646,12 +702,24 @@ func rollbackTransaction(
 		if amt == 0 {
 			continue
 		}
-		var unspentVal []byte
-		if unspentVal, err = fetchRawCreditUnspentValue(credKey); err != nil {
+		coins += amt
+
+		prevTxRecordKey := extractRawCreditTxRecordKey(credKey)
+		prevTxRecordVal := existsRawTxRecord(ns, prevTxRecordKey)
+		var prevRec TxRecord
+		copy(prevRec.Hash[:], prevTxRecordKey)
+		if err = readRawTxRecord(&prevRec.Hash, prevTxRecordVal, &prevRec); err != nil {
 			return
 		}
-		coins += amt
-		if err = putRawUnspent(ns, prevOutKey, unspentVal); err != nil {
+		prevTxo := prevRec.MsgTx.TxOut[prevOut.Index]
+		if err = unspent.Put(ns, &dbstructs.Unspent{
+			OutPoint:     *prevOut,
+			Block:        *block,
+			Address:      txscript.PkScriptToAddress(prevTxo.PkScript, params).String(),
+			Value:        prevTxo.Value,
+			FromCoinBase: blockchain.IsCoinBaseTx(&prevRec.MsgTx),
+			PkScript:     prevTxo.PkScript,
+		}); err != nil {
 			return
 		}
 
@@ -689,7 +757,7 @@ func rollbackTransaction(
 		if amt, change, err = fetchRawCreditAmountChange(v); err != nil {
 			return
 		}
-		outPointKey := canonicalOutPoint(&rec.Hash, uint32(i))
+		outPointKey := utilfun.CanonicalOutPoint(&rec.Hash, uint32(i))
 		unminedCredVal := valueUnminedCredit(amt, change)
 		if err = putRawUnminedCredit(ns, outPointKey, unminedCredVal); err != nil {
 			return
@@ -699,10 +767,15 @@ func rollbackTransaction(
 			return
 		}
 
-		credKey := existsRawUnspent(ns, outPointKey)
-		if credKey != nil {
+		op := wire.OutPoint{Hash: rec.Hash, Index: uint32(i)}
+		prevUnspent, errr := unspent.Get(ns, &op)
+		if errr != nil {
+			err = errr
+			return
+		}
+		if prevUnspent != nil {
 			coins -= btcutil.Amount(output.Value)
-			if err = deleteRawUnspent(ns, outPointKey); err != nil {
+			if err = unspent.Delete(ns, &op); err != nil {
 				return
 			}
 			prevAddr := txscript.PkScriptToAddress(output.PkScript, params).String()
@@ -757,21 +830,22 @@ func (s *Store) RollbackOne(ns walletdb.ReadWriteBucket, height int32) er.R {
 func (s *Store) ForEachUnspentOutput(
 	ns walletdb.ReadBucket,
 	beginKey []byte,
-	visitor func(key []byte, c *Credit) er.R,
-) er.R {
-	var op wire.OutPoint
-	var block Block
-	bu := ns.NestedReadBucket(bucketUnspent)
+	addrs map[string]struct{},
+	visitor func(key []byte, c *dbstructs.Unspent) er.R,
+) (int, er.R) {
 	var lastKey []byte
-	if err := bu.ForEachBeginningWith(beginKey, func(k, v []byte) er.R {
+	visits := 0
+	if err := unspent.ForEachUnspentOutput(ns, beginKey, func(k []byte, uns *dbstructs.Unspent) er.R {
 		lastKey = k
-		err := readCanonicalOutPoint(k, &op)
-		if err != nil {
-			return err
+		visits += 1
+
+		if _, ok := addrs[uns.Address]; !ok && len(addrs) > 0 {
+			// Skip non-matching address as soon as possible
+			return nil
 		}
 
 		// Skip the output if it's locked.
-		_, _, isLocked := isLockedOutput(ns, op, s.clock.Now())
+		_, _, isLocked := isLockedOutput(ns, uns.OutPoint, s.clock.Now())
 		if isLocked {
 			return nil
 		}
@@ -781,63 +855,31 @@ func (s *Store) ForEachUnspentOutput(
 			// Skip this k/v pair.
 			return nil
 		}
-		err = readUnspentBlock(v, &block)
-		if err != nil {
-			return err
-		}
 
-		br, err := fetchBlockRecord(ns, block.Height)
-		if err != nil {
-			return err
-		}
-		if !br.Hash.IsEqual(&block.Hash) {
-			log.Debugf("Skipping transaction [%s] because it references block [%s @ %d] "+
-				"which is not in the chain correct block is [%s]",
-				op.Hash, block.Hash, block.Height, br.Hash)
-			return nil
-		}
-
-		// TODO(jrick): reading the entire transaction should
-		// be avoidable.  Creating the credit only requires the
-		// output amount and pkScript.
-		rec, err := fetchTxRecord(ns, &op.Hash, &block)
-		if err != nil {
-			return err
-		} else if rec == nil {
-			return er.New("fetchTxRecord() -> nil")
-		}
-		txOut := rec.MsgTx.TxOut[op.Index]
-		cred := Credit{
-			OutPoint: op,
-			BlockMeta: BlockMeta{
-				Block: block,
-				Time:  br.Time,
-			},
-			Amount:       btcutil.Amount(txOut.Value),
-			PkScript:     txOut.PkScript,
-			Received:     rec.Received,
-			FromCoinBase: blockchain.IsCoinBaseTx(&rec.MsgTx),
-		}
-		return visitor(k, &cred)
+		return visitor(k, uns)
 	}); err != nil {
 		if er.IsLoopBreak(err) || Err.Is(err) {
-			return err
+			return visits, err
 		}
-		return storeError(ErrDatabase, "failed iterating unspent bucket", err)
+		return visits, storeError(ErrDatabase, "failed iterating unspent bucket", err)
 	}
 
 	// There's no easy way to do ForEachBeginningWith because these entries
 	// will appear out of order with the main unspents, but the amount of unconfirmed
 	// credits will tend to be small anyway so we might as well just send them all
 	// if the iterator gets to this stage.
+	//
+	// Note: This is slow, but unmined credits should be few in number.
 	if err := ns.NestedReadBucket(bucketUnminedCredits).ForEach(func(k, v []byte) er.R {
+		visits += 1
 		if existsRawUnminedInput(ns, k) != nil {
 			// Output is spent by an unmined transaction.
 			// Skip to next unmined credit.
 			return nil
 		}
 
-		err := readCanonicalOutPoint(k, &op)
+		var op wire.OutPoint
+		err := utilfun.ReadCanonicalOutPoint(k, &op)
 		if err != nil {
 			return err
 		}
@@ -848,8 +890,6 @@ func (s *Store) ForEachUnspentOutput(
 			return nil
 		}
 
-		// TODO(jrick): Reading/parsing the entire transaction record
-		// just for the output amount and script can be avoided.
 		recVal := existsRawUnmined(ns, op.Hash[:])
 		var rec TxRecord
 		err = readRawTxRecord(&op.Hash, recVal, &rec)
@@ -858,34 +898,37 @@ func (s *Store) ForEachUnspentOutput(
 		}
 
 		txOut := rec.MsgTx.TxOut[op.Index]
-		cred := Credit{
-			OutPoint: op,
-			BlockMeta: BlockMeta{
-				Block: Block{Height: -1},
-			},
-			Amount:       btcutil.Amount(txOut.Value),
-			PkScript:     txOut.PkScript,
-			Received:     rec.Received,
-			FromCoinBase: blockchain.IsCoinBaseTx(&rec.MsgTx),
+
+		addr := txscript.PkScriptToAddress(txOut.PkScript, s.chainParams).String()
+		if _, ok := addrs[addr]; !ok && len(addrs) > 0 {
+			return nil
+		}
+
+		unspent := dbstructs.Unspent{
+			OutPoint:     op,
+			Block:        dbstructs.Block{Height: -1},
+			Address:      addr,
+			Value:        txOut.Value,
+			FromCoinBase: false,
 		}
 		// Use the final key to come from the main search loop so that further calls
 		// will arrive here as quickly as possible.
-		return visitor(lastKey, &cred)
+		return visitor(lastKey, &unspent)
 	}); err != nil {
 		if er.IsLoopBreak(err) || Err.Is(err) {
-			return err
+			return visits, err
 		}
-		return storeError(ErrDatabase, "failed iterating unmined credits bucket", err)
+		return visits, storeError(ErrDatabase, "failed iterating unmined credits bucket", err)
 	}
 
-	return nil
+	return visits, nil
 }
 
 // GetUnspentOutputs returns all unspent received transaction outputs.
 // The order is undefined.
-func (s *Store) GetUnspentOutputs(ns walletdb.ReadBucket) ([]Credit, er.R) {
-	var unspent []Credit
-	err := s.ForEachUnspentOutput(ns, nil, func(_ []byte, c *Credit) er.R {
+func (s *Store) GetUnspentOutputs(ns walletdb.ReadBucket) ([]dbstructs.Unspent, er.R) {
+	var unspent []dbstructs.Unspent
+	_, err := s.ForEachUnspentOutput(ns, nil, nil, func(_ []byte, c *dbstructs.Unspent) er.R {
 		unspent = append(unspent, *c)
 		return nil
 	})
@@ -897,22 +940,23 @@ func (s *Store) Balance(ns walletdb.ReadBucket, minConf int32, syncHeight int32)
 	// we accept all unspent outputs with at least minConf confirms
 	coinbaseMaturity := int32(s.chainParams.CoinbaseMaturity)
 	bal := btcutil.Amount(0)
-	return bal, s.ForEachUnspentOutput(ns, nil, func(_ []byte, output *Credit) er.R {
-		if output.Height == -1 {
+	_, err := s.ForEachUnspentOutput(ns, nil, nil, func(_ []byte, uns *dbstructs.Unspent) er.R {
+		if uns.Block.Height == -1 {
 			// Not yet mined
 			if minConf == 0 {
-				bal += output.Amount
+				bal += btcutil.Amount(uns.Value)
 			}
 			return nil
 		}
-		confs := syncHeight - output.Height + 1
-		if output.FromCoinBase && confs < coinbaseMaturity {
+		confs := syncHeight - uns.Block.Height + 1
+		if uns.FromCoinBase && confs < coinbaseMaturity {
 		} else if confs < minConf {
 		} else {
-			bal += output.Amount
+			bal += btcutil.Amount(uns.Value)
 		}
 		return nil
 	})
+	return bal, err
 }
 
 // PutTxLabel validates transaction labels and writes them to disk if they
@@ -1000,11 +1044,13 @@ func DeserializeLabel(v []byte) (string, er.R) {
 // isKnownOutput returns whether the output is known to the transaction store
 // either as confirmed or unconfirmed.
 func isKnownOutput(ns walletdb.ReadWriteBucket, op wire.OutPoint) bool {
-	k := canonicalOutPoint(&op.Hash, op.Index)
+	k := utilfun.CanonicalOutPoint(&op.Hash, op.Index)
 	if existsRawUnminedCredit(ns, k) != nil {
 		return true
 	}
-	if existsRawUnspent(ns, k) != nil {
+	if uns, err := unspent.Get(ns, &op); err != nil {
+		log.Warnf("Error getting unspent [%s]: %s", op.String(), err.String())
+	} else if uns != nil {
 		return true
 	}
 	return false

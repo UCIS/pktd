@@ -240,14 +240,14 @@ func newBlockManager(s *ChainService,
 
 	// We fetch the genesis header to use for verifying the first received
 	// interval.
-	genesisHeader, err := s.RegFilterHeaders.FetchHeaderByHeight(0)
+	genesisHeader, err := s.NeutrinoDB.FetchFilterHeaderByHeight(0)
 	if err != nil {
 		return nil, err
 	}
 	bm.genesisHeader = *genesisHeader
 
 	// Initialize the next checkpoint based on the current height.
-	header, height, err := s.BlockHeaders.ChainTip()
+	header, height, err := s.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return nil, err
 	}
@@ -261,14 +261,14 @@ func newBlockManager(s *ChainService,
 
 	// Finally, we'll set the filter header tip so any goroutines waiting
 	// on the condition obtain the correct initial state.
-	_, bm.filterHeaderTip, err = s.RegFilterHeaders.ChainTip()
+	_, bm.filterHeaderTip, err = s.NeutrinoDB.FilterChainTip()
 	if err != nil {
 		return nil, err
 	}
 
 	// We must also ensure the the filter header tip hash is set to the
 	// block hash at the filter tip height.
-	fh, err := s.BlockHeaders.FetchHeaderByHeight(bm.filterHeaderTip)
+	fh, err := s.NeutrinoDB.FetchBlockHeaderByHeight(bm.filterHeaderTip)
 	if err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func newBlockManager(s *ChainService,
 
 	// Verification of PacketCrypt or AuxPoW proofs
 	bm.likelyChainTip = int32(time.Since(time.Unix(1566252000, 0)).Minutes())
-	walletdb.View(s.RegFilterHeaders.Db, func(tx walletdb.ReadTx) er.R {
+	walletdb.View(s.NeutrinoDB.Db, func(tx walletdb.ReadTx) er.R {
 		return bm.updateLikelyChainTip(tx, int32(height))
 	})
 
@@ -294,7 +294,7 @@ func (b *blockManager) updateLikelyChainTip(tx walletdb.ReadTx, height int32) er
 	if cp == nil {
 		return nil
 	}
-	fh, err := b.server.BlockHeaders.FetchHeaderByHeight1(tx, uint32(cp.Height))
+	fh, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight1(tx, uint32(cp.Height))
 	if err != nil {
 		log.Infof("Unable to update probable chain tip [%s]", err)
 		return err
@@ -405,14 +405,14 @@ func (b *blockManager) handleNewPeerMsg(peers *list.List, sp *ServerPeer) {
 	// If we're current with our sync peer and the new peer is advertising
 	// a higher block than the newest one we know of, request headers from
 	// the new peer.
-	_, height, err := b.server.BlockHeaders.ChainTip()
+	_, height, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		log.Criticalf("Couldn't retrieve block header chain tip: %s",
 			err)
 		return
 	}
 	if height < uint32(sp.StartingHeight()) && b.BlockHeadersSynced() {
-		locator, err := b.server.BlockHeaders.LatestBlockLocator()
+		locator, err := b.server.NeutrinoDB.LatestBlockLocator()
 		if err != nil {
 			log.Criticalf("Couldn't retrieve latest block "+
 				"locator: %s", err)
@@ -463,7 +463,7 @@ func (b *blockManager) handleDonePeerMsg(peers *list.List, sp *ServerPeer) {
 		b.syncPeerMutex.Lock()
 		b.syncPeer = nil
 		b.syncPeerMutex.Unlock()
-		header, height, err := b.server.BlockHeaders.ChainTip()
+		header, height, err := b.server.NeutrinoDB.BlockChainTip()
 		if err != nil {
 			return
 		}
@@ -542,7 +542,7 @@ waitForHeaders:
 	// Now that the block headers are finished or ahead of the filter
 	// headers, we'll grab the current chain tip so we can base our filter
 	// header sync off of that.
-	lastHeader, lastHeight, err := b.server.BlockHeaders.ChainTip()
+	lastHeader, lastHeight, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		log.Critical(err)
 		return
@@ -557,7 +557,7 @@ waitForHeaders:
 	b.newFilterHeadersMtx.RUnlock()
 
 	fType := wire.GCSFilterRegular
-	store := b.server.RegFilterHeaders
+	store := b.server.NeutrinoDB
 
 	log.Debugf("Starting cfheaders sync for filter_type=%v", fType)
 
@@ -625,7 +625,7 @@ waitForHeaders:
 		// See if we can detect which checkpoint list is correct. If
 		// not, we will cycle again.
 		goodCheckpoints, err = b.resolveConflict(
-			checkpoints, store, fType,
+			checkpoints, *store, fType,
 		)
 		if err != nil {
 			log.Warnf("got error attempting to determine correct "+
@@ -642,7 +642,7 @@ waitForHeaders:
 
 	// Get all the headers up to the last known good checkpoint.
 	b.getCheckpointedCFHeaders(
-		goodCheckpoints, store, fType,
+		goodCheckpoints, *store, fType,
 	)
 
 	// Now we check the headers again. If the block headers are not yet
@@ -702,7 +702,7 @@ waitForHeaders:
 		// At this point, we know that there're a set of new filter
 		// headers to fetch, so we'll grab them now.
 		if err = b.getUncheckpointedCFHeaders(
-			store, fType,
+			*store, fType,
 		); err != nil {
 			log.Debugf("couldn't get uncheckpointed headers for "+
 				"%v: %v", fType, err)
@@ -727,14 +727,14 @@ waitForHeaders:
 // network, if it can, and resolves any conflicts between them. It then writes
 // any verified headers to the store.
 func (b *blockManager) getUncheckpointedCFHeaders(
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) er.R {
+	store headerfs.NeutrinoDBStore, fType wire.FilterType) er.R {
 
 	// Get the filter header store's chain tip.
-	filterTip, filtHeight, err := store.ChainTip()
+	filterTip, filtHeight, err := store.FilterChainTip()
 	if err != nil {
 		return er.Errorf("error getting filter chain tip: %v", err)
 	}
-	blockHeader, blockHeight, err := b.server.BlockHeaders.ChainTip()
+	blockHeader, blockHeight, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return er.Errorf("error getting block chain tip: %v", err)
 	}
@@ -766,8 +766,10 @@ func (b *blockManager) getUncheckpointedCFHeaders(
 	for peer, msg := range headers {
 		if msg.PrevFilterHeader != *filterTip {
 			sp := b.server.PeerByAddr(peer)
-			log.Infof("Peer [%s] served invalid filter header", sp.Addr())
-			sp.addBanScore(0, 33, "InvalidFilterHeader")
+			if sp != nil {
+				log.Infof("Peer [%s] served invalid filter header", sp.Addr())
+				sp.addBanScore(0, 33, "InvalidFilterHeader")
+			}
 			delete(headers, peer)
 		}
 	}
@@ -820,21 +822,19 @@ func (b *blockManager) getUncheckpointedCFHeaders(
 			"with new set")
 	}
 
-	return walletdb.Update(store.Db, func(tx walletdb.ReadWriteTx) er.R {
-		_, _, err := b.writeCFHeadersMsg1(pristineHeaders, store, tx)
-		return err
-	})
+	_, _, err = b.writeCFHeadersMsg(pristineHeaders, store)
+	return err
 }
 
 // getCheckpointedCFHeaders catches a filter header store up with the
 // checkpoints we got from the network. It assumes that the filter header store
 // matches the checkpoints up to the tip of the store.
 func (b *blockManager) getCheckpointedCFHeaders(checkpoints []*chainhash.Hash,
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) {
+	store headerfs.NeutrinoDBStore, fType wire.FilterType) {
 
 	// We keep going until we've caught up the filter header store with the
 	// latest known checkpoint.
-	curHeader, curHeight, err := store.ChainTip()
+	curHeader, curHeight, err := store.FilterChainTip()
 	if err != nil {
 		panic(fmt.Sprintf("failed getting chaintip from filter "+
 			"store: %v", err))
@@ -881,7 +881,7 @@ func (b *blockManager) getCheckpointedCFHeaders(checkpoints []*chainhash.Hash,
 
 		// In order to fetch the range, we'll need the block header for
 		// the end of the height range.
-		stopHeader, err := b.server.BlockHeaders.FetchHeaderByHeight(
+		stopHeader, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight(
 			endHeightRange,
 		)
 		if err != nil {
@@ -1091,15 +1091,34 @@ func (b *blockManager) getCheckpointedCFHeaders(checkpoints []*chainhash.Hash,
 
 func (b *blockManager) writeCFHeadersMsg(
 	msg *wire.MsgCFHeaders,
-	store *headerfs.FilterHeaderStore,
+	store headerfs.NeutrinoDBStore,
 ) (*chainhash.Hash, uint32, er.R) {
 	var hash *chainhash.Hash
 	var height uint32
-	return hash, height, walletdb.Update(store.Db, func(tx walletdb.ReadWriteTx) er.R {
+	var matchingBlockHeaders []wire.BlockHeader
+	var startHeight uint32
+	err := walletdb.Update(store.Db, func(tx walletdb.ReadWriteTx) er.R {
 		var err er.R
-		hash, height, err = b.writeCFHeadersMsg1(msg, store, tx)
+		hash, height, matchingBlockHeaders, startHeight, err = b.writeCFHeadersMsg1(msg, store, tx)
 		return err
 	})
+	if err != nil {
+		return hash, height, err
+	}
+
+	// Notify subscribers, and also update the filter header progress
+	// logger at the same time.
+	for i, header := range matchingBlockHeaders {
+		header := header
+
+		headerHeight := startHeight + uint32(i)
+		b.fltrHeaderProgessLogger.LogBlockHeight(
+			header.Timestamp, int32(headerHeight),
+		)
+
+		b.onBlockConnected(header, headerHeight)
+	}
+	return hash, height, err
 }
 
 // writeCFHeadersMsg writes a cfheaders message to the specified store. It
@@ -1108,17 +1127,17 @@ func (b *blockManager) writeCFHeadersMsg(
 // constructed cfheader in this range as this lets callers populate the prev
 // filter header field in the next message range before writing to disk.
 func (b *blockManager) writeCFHeadersMsg1(msg *wire.MsgCFHeaders,
-	store *headerfs.FilterHeaderStore, tx walletdb.ReadWriteTx,
-) (*chainhash.Hash, uint32, er.R) {
+	store headerfs.NeutrinoDBStore, tx walletdb.ReadWriteTx,
+) (*chainhash.Hash, uint32, []wire.BlockHeader, uint32, er.R) {
 
 	// Check that the PrevFilterHeader is the same as the last stored so we
 	// can prevent misalignment.
-	tip, tipHeight, err := store.ChainTip1(tx)
+	tip, tipHeight, err := store.FilterChainTip1(tx)
 	if err != nil {
-		return nil, tipHeight, err
+		return nil, tipHeight, nil, 0, err
 	}
 	if *tip != msg.PrevFilterHeader {
-		return nil, tipHeight, er.Errorf("attempt to write cfheaders out of "+
+		return nil, tipHeight, nil, 0, er.Errorf("attempt to write cfheaders out of "+
 			"order! Tip=%v (height=%v), prev_hash=%v.", *tip,
 			tipHeight, msg.PrevFilterHeader)
 	}
@@ -1144,12 +1163,12 @@ func (b *blockManager) writeCFHeadersMsg1(msg *wire.MsgCFHeaders,
 	// these filters headers in their corresponding chains. Our query will
 	// return the headers for the entire checkpoint interval ending at the
 	// designated stop hash.
-	blockHeaders := b.server.BlockHeaders
-	matchingBlockHeaders, startHeight, err := blockHeaders.FetchHeaderAncestors(
+	blockHeaders := b.server.NeutrinoDB
+	matchingBlockHeaders, startHeight, err := blockHeaders.FetchBlockHeaderAncestors(
 		uint32(numHeaders-1), &msg.StopHash,
 	)
 	if err != nil {
-		return nil, startHeight, err
+		return nil, startHeight, nil, 0, err
 	}
 
 	for i := 0; i < numHeaders; i++ {
@@ -1167,9 +1186,9 @@ func (b *blockManager) writeCFHeadersMsg1(msg *wire.MsgCFHeaders,
 		lastHeader)
 
 	// Write the header batch.
-	err = store.WriteHeaders(tx, headerBatch...)
+	err = store.WriteFilterHeaders(tx, headerBatch...)
 	if err != nil {
-		return nil, lastHeight, err
+		return nil, lastHeight, matchingBlockHeaders, startHeight, err
 	}
 
 	// We'll also set the new header tip and notify any peers that the tip
@@ -1182,20 +1201,7 @@ func (b *blockManager) writeCFHeadersMsg1(msg *wire.MsgCFHeaders,
 	b.newFilterHeadersMtx.Unlock()
 	b.newFilterHeadersSignal.Broadcast()
 
-	// Notify subscribers, and also update the filter header progress
-	// logger at the same time.
-	for i, header := range matchingBlockHeaders {
-		header := header
-
-		headerHeight := startHeight + uint32(i)
-		b.fltrHeaderProgessLogger.LogBlockHeight(
-			header.Timestamp, int32(headerHeight),
-		)
-
-		b.onBlockConnected(header, headerHeight)
-	}
-
-	return &lastHeader, lastHeight, nil
+	return &lastHeader, lastHeight, matchingBlockHeaders, startHeight, nil
 }
 
 // minCheckpointHeight returns the height of the last filter checkpoint for the
@@ -1242,7 +1248,7 @@ func verifyCheckpoint(prevCheckpoint, nextCheckpoint *chainhash.Hash,
 // information.
 func (b *blockManager) resolveConflict(
 	checkpoints map[string][]*chainhash.Hash,
-	store *headerfs.FilterHeaderStore, fType wire.FilterType) (
+	store headerfs.NeutrinoDBStore, fType wire.FilterType) (
 	[]*chainhash.Hash, er.R) {
 
 	// First check the served checkpoints against the hardcoded ones.
@@ -1413,7 +1419,7 @@ func (b *blockManager) detectBadPeers(headers map[string]*wire.MsgCFHeaders,
 	log.Warnf("Detected cfheader mismatch at height=%v!!!", targetHeight)
 
 	// Get the block header for this height.
-	header, err := b.server.BlockHeaders.FetchHeaderByHeight(targetHeight)
+	header, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight(targetHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -1713,12 +1719,12 @@ func (b *blockManager) getCFHeadersForAllPeers(height uint32,
 	// Get the header we expect at either the tip of the block header store
 	// or at the end of the maximum-size response message, whichever is
 	// larger.
-	stopHeader, stopHeight, err := b.server.BlockHeaders.ChainTip()
+	stopHeader, stopHeight, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return nil, 0
 	}
 	if stopHeight-height >= wire.MaxCFHeadersPerMsg {
-		stopHeader, err = b.server.BlockHeaders.FetchHeaderByHeight(
+		stopHeader, err = b.server.NeutrinoDB.FetchBlockHeaderByHeight(
 			height + wire.MaxCFHeadersPerMsg - 1,
 		)
 		if err != nil {
@@ -1845,10 +1851,10 @@ func (b *blockManager) getCheckpts(lastHash *chainhash.Hash,
 // existing store up to the tip of the store. If all of the peers match but
 // the store doesn't, the height at which the mismatch occurs is returned.
 func checkCFCheckptSanity(cp map[string][]*chainhash.Hash,
-	headerStore *headerfs.FilterHeaderStore) (int, er.R) {
+	headerStore headerfs.NeutrinoDBStore) (int, er.R) {
 
 	// Get the known best header to compare against checkpoints.
-	_, storeTip, err := headerStore.ChainTip()
+	_, storeTip, err := headerStore.FilterChainTip()
 	if err != nil {
 		return 0, err
 	}
@@ -1884,7 +1890,7 @@ func checkCFCheckptSanity(cp map[string][]*chainhash.Hash,
 		ckptHeight := uint32((i + 1) * wire.CFCheckptInterval)
 
 		if ckptHeight <= storeTip {
-			header, err := headerStore.FetchHeaderByHeight(
+			header, err := headerStore.FetchFilterHeaderByHeight(
 				ckptHeight,
 			)
 			if err != nil {
@@ -2026,7 +2032,7 @@ func (b *blockManager) startSync(peers *list.List) {
 		return
 	}
 
-	_, bestHeight, err := b.server.BlockHeaders.ChainTip()
+	_, bestHeight, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		log.Errorf("Failed to get hash and height for the "+
 			"latest block: %s", err)
@@ -2061,7 +2067,7 @@ func (b *blockManager) startSync(peers *list.List) {
 
 	// Start syncing from the best peer if one was selected.
 	if bestPeer != nil {
-		locator, err := b.server.BlockHeaders.LatestBlockLocator()
+		locator, err := b.server.NeutrinoDB.LatestBlockLocator()
 		if err != nil {
 			log.Errorf("Failed to get block locator for the "+
 				"latest block: %s", err)
@@ -2112,12 +2118,12 @@ func (b *blockManager) startSync(peers *list.List) {
 // synced to the connected peers, meaning both block headers and filter headers
 // are current.
 func (b *blockManager) IsFullySynced() bool {
-	_, blockHeaderHeight, err := b.server.BlockHeaders.ChainTip()
+	_, blockHeaderHeight, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return false
 	}
 
-	_, filterHeaderHeight, err := b.server.RegFilterHeaders.ChainTip()
+	_, filterHeaderHeight, err := b.server.NeutrinoDB.FilterChainTip()
 	if err != nil {
 		return false
 	}
@@ -2140,7 +2146,7 @@ func (b *blockManager) BlockHeadersSynced() bool {
 	defer b.syncPeerMutex.RUnlock()
 
 	// Figure out the latest block we know.
-	header, height, err := b.server.BlockHeaders.ChainTip()
+	header, height, err := b.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return false
 	}
@@ -2228,7 +2234,7 @@ func (b *blockManager) handleInvMsg(imsg *invMsg) {
 	// If our chain is current and a peer announces a block we already
 	// know of, then update their current block height.
 	if lastBlock != -1 && b.BlockHeadersSynced() {
-		height, err := b.server.BlockHeaders.HeightFromHash(&invVects[lastBlock].Hash)
+		height, err := b.server.NeutrinoDB.HeightFromHash(&invVects[lastBlock].Hash)
 		if err == nil {
 			imsg.peer.UpdateLastBlockHeight(int32(height))
 		}
@@ -2262,7 +2268,7 @@ func (b *blockManager) handleInvMsg(imsg *invMsg) {
 			locator = append(locator, &lastHash)
 
 			// Add locator from the database as backup.
-			knownLocator, err := b.server.BlockHeaders.LatestBlockLocator()
+			knownLocator, err := b.server.NeutrinoDB.LatestBlockLocator()
 			if err == nil {
 				locator = append(locator, knownLocator...)
 			}
@@ -2316,7 +2322,7 @@ func (b *blockManager) handleHeadersMsg(hmsg *headersMsg) {
 		return
 	}
 
-	_, backHeight, err := b.server.BlockHeaders.FetchHeader(
+	_, backHeight, err := b.server.NeutrinoDB.FetchBlockHeader(
 		&msg.Headers[0].PrevBlock,
 	)
 	if err != nil {
@@ -2411,7 +2417,7 @@ func blockHashByHeight(needHeight int32,
 		}
 		log.Tracef("PacketCrypt getting header hash [%d] from new headers", needHeight)
 		return newHeaders[needHeight-newHeadersHeight].BlockHash(), nil
-	} else if hdr, err := server.BlockHeaders.FetchHeaderByHeight(uint32(needHeight)); err != nil {
+	} else if hdr, err := server.NeutrinoDB.FetchBlockHeaderByHeight(uint32(needHeight)); err != nil {
 		return chainhash.Hash{}, err
 	} else {
 		log.Tracef("PacketCrypt getting header hash [%d] from chain", needHeight)
@@ -2456,7 +2462,7 @@ func checkPacketCryptProof(
 }
 
 func (b *blockManager) handleProvenHeadersMsg(phmsg *provenHeadersMsg) {
-	if err := walletdb.Update(b.server.RegFilterHeaders.Db, func(tx walletdb.ReadWriteTx) er.R {
+	if err := walletdb.Update(b.server.NeutrinoDB.Db, func(tx walletdb.ReadWriteTx) er.R {
 		return b.handleProvenHeadersMsg1(tx, phmsg)
 	}); err != nil {
 		log.Warnf("Error processing headers msg: %v", err)
@@ -2584,7 +2590,7 @@ func (b *blockManager) handleProvenHeadersMsg1(tx walletdb.ReadWriteTx, phmsg *p
 
 			// Check if this block is known. If so, we continue to
 			// the next one.
-			_, _, err := b.server.BlockHeaders.FetchHeader1(tx, &blockHash)
+			_, _, err := b.server.NeutrinoDB.FetchBlockHeader1(tx, &blockHash)
 			if err == nil {
 				continue
 			}
@@ -2596,7 +2602,7 @@ func (b *blockManager) handleProvenHeadersMsg1(tx walletdb.ReadWriteTx, phmsg *p
 			// these headers. Otherwise, the headers don't connect
 			// to anything we know and we should disconnect the
 			// peer.
-			backHead, backHeight, err := b.server.BlockHeaders.FetchHeader1(
+			backHead, backHeight, err := b.server.NeutrinoDB.FetchBlockHeader1(
 				tx, &blockHeader.PrevBlock,
 			)
 			if err != nil {
@@ -2684,7 +2690,7 @@ func (b *blockManager) handleProvenHeadersMsg1(tx walletdb.ReadWriteTx, phmsg *p
 					knownHead = &knownEl.Header
 					knownEl = knownEl.Prev()
 				} else {
-					knownHead, _, err = b.server.BlockHeaders.FetchHeader1(
+					knownHead, _, err = b.server.NeutrinoDB.FetchBlockHeader1(
 						tx, &knownHead.PrevBlock)
 					if err != nil {
 						return err
@@ -2729,7 +2735,7 @@ func (b *blockManager) handleProvenHeadersMsg1(tx walletdb.ReadWriteTx, phmsg *p
 				BlockHeader: blockHeader,
 				Height:      backHeight + 1,
 			}
-			err = b.server.BlockHeaders.WriteHeaders(tx, hdrs)
+			err = b.server.NeutrinoDB.WriteBlockHeaders(tx, hdrs)
 			if err != nil {
 				return err
 			}
@@ -2790,7 +2796,7 @@ func (b *blockManager) handleProvenHeadersMsg1(tx walletdb.ReadWriteTx, phmsg *p
 		// With all the headers in this batch validated, we'll write
 		// them all in a single transaction such that this entire batch
 		// is atomic.
-		err := b.server.BlockHeaders.WriteHeaders(tx, headerWriteBatch...)
+		err := b.server.NeutrinoDB.WriteBlockHeaders(tx, headerWriteBatch...)
 		if err != nil {
 			log.Errorf("Unable to write block headers: %v", err)
 			return err
@@ -2934,7 +2940,7 @@ func (b *blockManager) calcNextRequiredDifficulty(newBlockTime time.Time,
 
 	// Get the block node at the previous retarget (targetTimespan days
 	// worth of blocks).
-	firstNode, err := b.server.BlockHeaders.FetchHeaderByHeight(
+	firstNode, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight(
 		uint32(lastNode.Height + 1 - b.blocksPerRetarget),
 	)
 	if err != nil {
@@ -3013,7 +3019,7 @@ func (b *blockManager) findPrevTestNetDifficulty(hList headerlist.Chain) (uint32
 		if el != nil {
 			iterNode = &el.Header
 		} else {
-			node, err := b.server.BlockHeaders.FetchHeaderByHeight(
+			node, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight(
 				uint32(iterHeight),
 			)
 			if err != nil {
@@ -3094,7 +3100,7 @@ func (b *blockManager) NotificationsSinceHeight(
 	// backlog to the caller before we proceed.
 	blocks := make([]blockntfns.BlockNtfn, 0, bestHeight-height)
 	for i := height + 1; i <= bestHeight; i++ {
-		header, err := b.server.BlockHeaders.FetchHeaderByHeight(i)
+		header, err := b.server.NeutrinoDB.FetchBlockHeaderByHeight(i)
 		if err != nil {
 			return nil, 0, err
 		}

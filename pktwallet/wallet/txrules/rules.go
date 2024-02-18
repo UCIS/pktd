@@ -10,7 +10,7 @@ import (
 	"github.com/pkt-cash/pktd/blockchain"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/chaincfg"
-	"github.com/pkt-cash/pktd/pktwallet/wtxmgr"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
 	"github.com/pkt-cash/pktd/wire/ruleerror"
 
 	"github.com/pkt-cash/pktd/btcutil"
@@ -63,12 +63,12 @@ func IsDustOutput(output *wire.TxOut, relayFeePerKb btcutil.Amount) bool {
 		relayFeePerKb)
 }
 
-func IsBurned(output *wtxmgr.Credit, chainParams *chaincfg.Params, currentHeight int32) bool {
-	if !output.FromCoinBase {
+func IsBurned(uns *dbstructs.Unspent, chainParams *chaincfg.Params, currentHeight int32) bool {
+	if !uns.FromCoinBase {
 	} else if !chainParams.GlobalConf.HasNetworkSteward {
-	} else if currentHeight-129600 < output.Height {
-	} else if int64(output.Amount) != blockchain.PktCalcNetworkStewardPayout(
-		blockchain.CalcBlockSubsidy(output.Height, chainParams)) {
+	} else if currentHeight-129600 < uns.Block.Height {
+	} else if uns.Value != blockchain.PktCalcNetworkStewardPayout(
+		blockchain.CalcBlockSubsidy(uns.Block.Height, chainParams)) {
 	} else {
 		return true
 	}

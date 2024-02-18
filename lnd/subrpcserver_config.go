@@ -63,7 +63,9 @@ type subRPCServerConfigs struct {
 	// clients to send payments on the network, and perform Lightning
 	// payment related queries such as requests for estimates of off-chain
 	// fees.
-	RouterRPC *routerrpc.Config `group:"routerrpc" namespace:"routerrpc"`
+	//	we want to disable the use of macaroons just for the users so,
+	//	no more CLI options, config ini options or help for the following Config field
+	RouterRPC *routerrpc.Config
 
 	// WatchtowerRPC is a sub-RPC server that exposes functionality allowing
 	// clients to monitor and control their embedded watchtower.

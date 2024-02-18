@@ -11,6 +11,9 @@ option go_package = "github.com/pkt-cash/pktd/lnd/lnrpc/walletrpc";
 // daemon's wallet.
 service WalletKit {
     /*
+    $pld.category: `Unspent`
+    $pld.short_description: `List utxos available for spending`
+
     ListUnspent returns a list of all utxos spendable by the wallet with a
     number of confirmations between the specified minimum and maximum.
     */

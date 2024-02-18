@@ -2,16 +2,13 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"strings"
 
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
-	"github.com/pkt-cash/pktd/lnd/lncfg"
 	"github.com/urfave/cli"
-	"gopkg.in/macaroon.v2"
 )
 
 var (
@@ -405,40 +402,44 @@ func profileAddMacaroon(ctx *cli.Context) er.R {
 		return er.Errorf("profile with name %s not found", profileName)
 	}
 
-	// Does a macaroon with that name already exist?
-	for _, m := range selectedProfile.Macaroons.Jar {
-		if m.Name == macName {
-			return er.Errorf("a macaroon with the name %s "+
-				"already exists", macName)
+	//	we want to disable the use of macaroons so, no need to manage them anymore
+	/*
+		// Does a macaroon with that name already exist?
+		for _, m := range selectedProfile.Macaroons.Jar {
+			if m.Name == macName {
+				return er.Errorf("a macaroon with the name %s "+
+					"already exists", macName)
+			}
 		}
-	}
 
-	// Do we need to update the default entry to be this one?
-	if ctx.Bool("default") {
-		selectedProfile.Macaroons.Default = macName
-	}
+		// Do we need to update the default entry to be this one?
+		if ctx.Bool("default") {
+			selectedProfile.Macaroons.Default = macName
+		}
 
-	// Now load and possibly encrypt the macaroon file.
-	macPath := lncfg.CleanAndExpandPath(ctx.GlobalString("macaroonpath"))
-	macBytes, errr := ioutil.ReadFile(macPath)
-	if errr != nil {
-		return er.Errorf("unable to read macaroon path: %v", errr)
-	}
-	mac := &macaroon.Macaroon{}
-	if errr = mac.UnmarshalBinary(macBytes); errr != nil {
-		return er.Errorf("unable to decode macaroon: %v", errr)
-	}
-	macEntry := &macaroonEntry{
-		Name: macName,
-	}
-	if err = macEntry.storeMacaroon(mac, nil); err != nil {
-		return er.Errorf("unable to store macaroon: %v", err)
-	}
+		// Now load and possibly encrypt the macaroon file.
+		macPath := lncfg.CleanAndExpandPath(ctx.GlobalString("macaroonpath"))
+		macBytes, errr := ioutil.ReadFile(macPath)
+		if errr != nil {
+			return er.Errorf("unable to read macaroon path: %v", errr)
+		}
+		mac := &macaroon.Macaroon{}
+		if errr = mac.UnmarshalBinary(macBytes); errr != nil {
+			return er.Errorf("unable to decode macaroon: %v", errr)
+		}
+		macEntry := &macaroonEntry{
+			Name: macName,
+		}
+		if err = macEntry.storeMacaroon(mac, nil); err != nil {
+			return er.Errorf("unable to store macaroon: %v", err)
+		}
 
-	// All done, store the updated profile file.
-	selectedProfile.Macaroons.Jar = append(
-		selectedProfile.Macaroons.Jar, macEntry,
-	)
+		// All done, store the updated profile file.
+		selectedProfile.Macaroons.Jar = append(
+			selectedProfile.Macaroons.Jar, macEntry,
+		)
+	*/
+
 	if err = saveProfileFile(defaultProfileFile, f); err != nil {
 		return er.Errorf("error writing profile file %s: %v",
 			defaultProfileFile, err)

@@ -146,14 +146,14 @@ func EstimateSerializeSize(inputCount int, txOuts []*wire.TxOut, addChangeOutput
 func EstimateVirtualSize(numP2PKHIns, numP2WPKHIns, numNestedP2WPKHIns int,
 	txOuts []*wire.TxOut, addChangeOutput bool) int {
 	changeSize := 0
-	outputCount := len(txOuts)
+	//outputCount := len(txOuts)
 	if addChangeOutput {
 		// We are (almost) always using P2WPKH as change output.
 		// But a P2PKH is 2 bytes larger and it's better to just pay a little
 		// extra fee in the common case rather than make an invalid txn in the
 		// rare case.
 		changeSize = P2PKHOutputSize
-		outputCount++
+		//outputCount++
 	}
 
 	// Version 4 bytes + LockTime 4 bytes + Serialized var int size for the

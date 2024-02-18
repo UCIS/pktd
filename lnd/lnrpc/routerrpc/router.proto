@@ -10,6 +10,9 @@ option go_package = "github.com/pkt-cash/pktd/lnd/lnrpc/routerrpc";
 // subsystem of the daemon.
 service Router {
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Send a payment over lightning`
+
     SendPaymentV2 attempts to route a payment described by the passed
     PaymentRequest to the final destination. The call returns a stream of
     payment updates.
@@ -17,6 +20,9 @@ service Router {
     rpc SendPaymentV2 (SendPaymentRequest) returns (stream lnrpc.Payment);
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Track payment`
+
     TrackPaymentV2 returns an update stream for the payment identified by the
     payment hash.
     */
@@ -40,6 +46,9 @@ service Router {
     }
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Send a payment over a predefined route`
+
     SendToRouteV2 attempts to make a payment via the specified route. This
     method differs from SendPayment in that it allows users to specify a full
     route manually. This can be used for things like rebalancing, and atomic
@@ -48,6 +57,9 @@ service Router {
     rpc SendToRouteV2 (SendToRouteRequest) returns (lnrpc.HTLCAttempt);
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Reset internal mission control state`
+
     ResetMissionControl clears all mission control state and starts with a clean
     slate.
     */
@@ -55,6 +67,9 @@ service Router {
         returns (ResetMissionControlResponse);
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Query the internal mission control state`
+
     QueryMissionControl exposes the internal mission control state to callers.
     It is a development feature.
     */
@@ -62,6 +77,9 @@ service Router {
         returns (QueryMissionControlResponse);
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Estimate a success probability`
+
     QueryProbability returns the current success probability estimate for a
     given node pair and amount.
     */
@@ -69,6 +87,9 @@ service Router {
         returns (QueryProbabilityResponse);
 
     /*
+    $pld.category: `Payment`
+    $pld.short_description: `Build a route from a list of hop pubkeys`
+
     BuildRoute builds a fully specified route based on a list of hop public
     keys. It retrieves the relevant channel policies from the graph in order to
     calculate the correct fees and time locks.

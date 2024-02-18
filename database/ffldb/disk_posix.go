@@ -22,5 +22,5 @@ func getAvailableDiskSpace(path string) (uint64, error) {
 
 	syscall.Statfs(wd, &stat)
 
-	return stat.Bavail * uint64(stat.Bsize), nil
+	return uint64(stat.Bavail) * uint64(stat.Bsize), nil
 }

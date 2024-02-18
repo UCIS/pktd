@@ -42,10 +42,8 @@ func Intercept() er.R {
 	}
 
 	signalsToCatch := []os.Signal{
-		os.Interrupt,
 		os.Kill,
 		syscall.SIGTERM,
-		syscall.SIGQUIT,
 	}
 	signal.Notify(interruptChannel, signalsToCatch...)
 	go mainInterruptHandler()

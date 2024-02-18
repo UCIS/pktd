@@ -20,6 +20,7 @@ import (
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
 	_ "github.com/pkt-cash/pktd/pktwallet/walletdb/bdb"
 	"github.com/pkt-cash/pktd/pktwallet/wtxmgr"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
 	"github.com/pkt-cash/pktd/txscript"
 	"github.com/pkt-cash/pktd/wire"
 )
@@ -100,7 +101,7 @@ func TestTxToOutputsDryRun(t *testing.T) {
 	blockHash, _ := chainhash.NewHashFromStr(
 		"00000000000000017188b968a371bab95aa43522665353b646e41865abae02a4")
 	block := &wtxmgr.BlockMeta{
-		Block: wtxmgr.Block{Hash: *blockHash, Height: 276425},
+		Block: dbstructs.Block{Hash: *blockHash, Height: 276425},
 		Time:  time.Unix(1387737310, 0),
 	}
 
@@ -139,7 +140,7 @@ func TestTxToOutputsDryRun(t *testing.T) {
 		Outputs:        txOuts,
 		Minconf:        1,
 		FeeSatPerKB:    1000,
-		DryRun:         true,
+		SendMode:       SendModeUnsigned,
 		ChangeAddress:  nil,
 		InputMinHeight: 0,
 	}
@@ -187,7 +188,7 @@ func TestTxToOutputsDryRun(t *testing.T) {
 
 	// Now we do a proper, non-dry run. This should add a change address
 	// to the database.
-	txr.DryRun = false
+	txr.SendMode = SendModeBcasted
 	tx, err := w.txToOutputs(txr)
 	if err != nil {
 		t.Fatalf("unable to author tx: %v", err)
@@ -237,7 +238,7 @@ func addUtxo(t *testing.T, w *Wallet, incomingTx *wire.MsgTx) {
 	// The block meta will be inserted to tell the wallet this is a
 	// confirmed transaction.
 	block := &wtxmgr.BlockMeta{
-		Block: wtxmgr.Block{
+		Block: dbstructs.Block{
 			Hash:   *testBlockHash,
 			Height: testBlockHeight,
 		},

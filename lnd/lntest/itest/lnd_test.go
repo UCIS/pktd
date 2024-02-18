@@ -1858,7 +1858,7 @@ out:
 				continue
 			}
 
-			if e.Node1Pub == advertisingNode {
+			if string(e.Node1Pub) == advertisingNode {
 				policies = append(policies, e.Node1Policy)
 			} else {
 				policies = append(policies, e.Node2Policy)
@@ -2127,7 +2127,7 @@ func testUpdateChannelPolicy(net *lntest.NetworkHarness, t *harnessTest) {
 	// 5000 mSAT, as this is accepted.
 	payAmt = btcutil.Amount(5)
 	routesReq := &lnrpc.QueryRoutesRequest{
-		PubKey:         carol.PubKeyStr,
+		PubKey:         carol.PubKey[:],
 		Amt:            int64(payAmt),
 		FinalCltvDelta: defaultTimeLockDelta,
 	}
@@ -5526,7 +5526,7 @@ func testSingleHopSendToRouteCase(net *lntest.NetworkHarness, t *harnessTest,
 	// Query for routes to pay from Carol to Dave using the default CLTV
 	// config.
 	routesReq := &lnrpc.QueryRoutesRequest{
-		PubKey: dave.PubKeyStr,
+		PubKey: dave.PubKey[:],
 		Amt:    paymentAmtSat,
 	}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
@@ -5881,7 +5881,7 @@ func testMultiHopSendToRoute(net *lntest.NetworkHarness, t *harnessTest) {
 	// htlcswitch is 40.
 	const paymentAmt = 1000
 	routesReq := &lnrpc.QueryRoutesRequest{
-		PubKey:         carol.PubKeyStr,
+		PubKey:         carol.PubKey[:],
 		Amt:            paymentAmt,
 		FinalCltvDelta: chainreg.DefaultBitcoinTimeLockDelta,
 	}
@@ -6043,7 +6043,7 @@ func testSendToRouteErrorPropagation(net *lntest.NetworkHarness, t *harnessTest)
 	// Query routes from Carol to Charlie which will be an invalid route
 	// for Alice -> Bob.
 	fakeReq := &lnrpc.QueryRoutesRequest{
-		PubKey: charlie.PubKeyStr,
+		PubKey: charlie.PubKey[:],
 		Amt:    int64(1),
 	}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
@@ -6737,7 +6737,7 @@ func testInvoiceRoutingHints(net *lntest.NetworkHarness, t *harnessTest) {
 
 	var aliceBobChanID uint64
 	for _, channel := range listResp.Channels {
-		if channel.RemotePubkey == net.Bob.PubKeyStr {
+		if string(channel.RemotePubkey) == net.Bob.PubKeyStr {
 			aliceBobChanID = channel.ChanId
 		}
 	}
@@ -7930,7 +7930,7 @@ func testGarbageCollectLinkNodes(net *lntest.NetworkHarness, t *harnessTest) {
 		}
 
 		for _, peer := range resp.Peers {
-			if peer.PubKey == pubKey {
+			if string(peer.PubKey) == pubKey {
 				return true
 			}
 		}
@@ -8108,11 +8108,11 @@ func testGarbageCollectLinkNodes(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("unable to query for alice's channel graph: %v", errr)
 	}
 	for _, node := range channelGraph.Nodes {
-		if node.PubKey == net.Bob.PubKeyStr {
+		if string(node.PubKey) == net.Bob.PubKeyStr {
 			t.Fatalf("did not expect to find bob in the channel " +
 				"graph, but did")
 		}
-		if node.PubKey == carol.PubKeyStr {
+		if string(node.PubKey) == carol.PubKeyStr {
 			t.Fatalf("did not expect to find carol in the channel " +
 				"graph, but did")
 		}
@@ -10568,7 +10568,7 @@ func testNodeSignVerify(net *lntest.NetworkHarness, t *harnessTest) {
 	aliceMsg := []byte("alice msg")
 
 	// alice signs "alice msg" and sends her signature to bob.
-	sigReq := &lnrpc.SignMessageRequest{Msg: aliceMsg}
+	sigReq := &lnrpc.SignMessageRequest{MsgBin: aliceMsg}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	sigResp, err := net.Alice.SignMessage(ctxt, sigReq)
 	if err != nil {
@@ -10578,18 +10578,21 @@ func testNodeSignVerify(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// bob verifying alice's signature should succeed since alice and bob are
 	// connected.
-	verifyReq := &lnrpc.VerifyMessageRequest{Msg: aliceMsg, Signature: aliceSig}
+	verifyReq := &signrpc.VerifyMessageReq{Msg: aliceMsg, Signature: []byte(aliceSig)}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
-	verifyResp, err := net.Bob.VerifyMessage(ctxt, verifyReq)
+	verifyResp, err := net.Bob.SignerClient.VerifyMessage(ctxt, verifyReq)
 	if err != nil {
 		t.Fatalf("VerifyMessage failed: %v", err)
 	}
 	if !verifyResp.Valid {
 		t.Fatalf("alice's signature didn't validate")
 	}
-	if verifyResp.Pubkey != net.Alice.PubKeyStr {
-		t.Fatalf("alice's signature doesn't contain alice's pubkey.")
-	}
+	//	TODO: the Pubkey field was removed from signrpc.SignerClient
+	/*
+		if verifyResp.Pubkey != net.Alice.PubKeyStr {
+			t.Fatalf("alice's signature doesn't contain alice's pubkey.")
+		}
+	*/
 
 	// carol is a new node that is unconnected to alice or bob.
 	carol, errr := net.NewNode("Carol", nil)
@@ -10601,7 +10604,7 @@ func testNodeSignVerify(net *lntest.NetworkHarness, t *harnessTest) {
 	carolMsg := []byte("carol msg")
 
 	// carol signs "carol msg" and sends her signature to bob.
-	sigReq = &lnrpc.SignMessageRequest{Msg: carolMsg}
+	sigReq = &lnrpc.SignMessageRequest{MsgBin: carolMsg}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
 	sigResp, err = carol.SignMessage(ctxt, sigReq)
 	if err != nil {
@@ -10610,18 +10613,21 @@ func testNodeSignVerify(net *lntest.NetworkHarness, t *harnessTest) {
 	carolSig := sigResp.Signature
 
 	// bob verifying carol's signature should fail since they are not connected.
-	verifyReq = &lnrpc.VerifyMessageRequest{Msg: carolMsg, Signature: carolSig}
+	verifyReq = &signrpc.VerifyMessageReq{Msg: carolMsg, Signature: []byte(carolSig)}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
-	verifyResp, err = net.Bob.VerifyMessage(ctxt, verifyReq)
+	verifyResp, err = net.Bob.SignerClient.VerifyMessage(ctxt, verifyReq)
 	if err != nil {
 		t.Fatalf("VerifyMessage failed: %v", err)
 	}
 	if verifyResp.Valid {
 		t.Fatalf("carol's signature should not be valid")
 	}
-	if verifyResp.Pubkey != carol.PubKeyStr {
-		t.Fatalf("carol's signature doesn't contain her pubkey")
-	}
+	//	TODO: the Pubkey field was removed from signrpc.SignerClient
+	/*
+		if verifyResp.Pubkey != carol.PubKeyStr {
+			t.Fatalf("carol's signature doesn't contain her pubkey")
+		}
+	*/
 
 	// Close the channel between alice and bob.
 	ctxt, _ = context.WithTimeout(ctxb, channelCloseTimeout)
@@ -12469,7 +12475,7 @@ func testQueryRoutes(net *lntest.NetworkHarness, t *harnessTest) {
 	// Query for routes to pay from Alice to Dave.
 	const paymentAmt = 1000
 	routesReq := &lnrpc.QueryRoutesRequest{
-		PubKey: dave.PubKeyStr,
+		PubKey: dave.PubKey[:],
 		Amt:    paymentAmt,
 	}
 	ctxt, _ = context.WithTimeout(ctxb, defaultTimeout)
@@ -12733,7 +12739,7 @@ func testRouteFeeCutoff(net *lntest.NetworkHarness, t *harnessTest) {
 
 	var aliceBobChanID, bobDaveChanID uint64
 	for _, channel := range listResp.Channels {
-		switch channel.RemotePubkey {
+		switch string(channel.RemotePubkey) {
 		case net.Alice.PubKeyStr:
 			aliceBobChanID = channel.ChanId
 		case dave.PubKeyStr:
@@ -12775,7 +12781,7 @@ func testRouteFeeCutoff(net *lntest.NetworkHarness, t *harnessTest) {
 	// payments.
 	testFeeCutoff := func(feeLimit *lnrpc.FeeLimit) {
 		queryRoutesReq := &lnrpc.QueryRoutesRequest{
-			PubKey:   dave.PubKeyStr,
+			PubKey:   dave.PubKey[:],
 			Amt:      paymentAmt,
 			FeeLimit: feeLimit,
 		}
@@ -13283,7 +13289,7 @@ func testSweepAllCoins(net *lntest.NetworkHarness, t *harnessTest) {
 	sendCoinsLabel := "send all coins"
 
 	sweepReq := &lnrpc.SendCoinsRequest{
-		Addr:    info.IdentityPubkey,
+		Addr:    string(info.IdentityPubkey),
 		SendAll: true,
 		Label:   sendCoinsLabel,
 	}
@@ -13299,7 +13305,7 @@ func testSweepAllCoins(net *lntest.NetworkHarness, t *harnessTest) {
 	}
 
 	sweepReq = &lnrpc.SendCoinsRequest{
-		Addr:    info.IdentityPubkey,
+		Addr:    string(info.IdentityPubkey),
 		SendAll: true,
 		Label:   sendCoinsLabel,
 	}
@@ -13652,7 +13658,7 @@ func testHoldInvoicePersistence(net *lntest.NetworkHarness, t *harnessTest) {
 			}
 
 			// The preimage should NEVER be non-zero at this point.
-			if payment.PaymentPreimage != zeroPreimg.String() {
+			if string(payment.PaymentPreimage) != zeroPreimg.String() {
 				t.Fatalf("expected zero preimage, got %v",
 					payment.PaymentPreimage)
 			}
@@ -13833,7 +13839,7 @@ func testHoldInvoicePersistence(net *lntest.NetworkHarness, t *harnessTest) {
 		var p string
 		for _, resp := range paymentsResp.Payments {
 			if resp.PaymentHash == paymentHash.String() {
-				p = resp.PaymentPreimage
+				p = string(resp.PaymentPreimage)
 				break
 			}
 		}

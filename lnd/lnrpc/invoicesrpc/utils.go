@@ -142,7 +142,6 @@ func CreateRPCInvoice(invoice *channeldb.Invoice,
 		SettleIndex:     invoice.SettleIndex,
 		AmtPaidSat:      int64(satAmtPaid),
 		AmtPaidMsat:     int64(invoice.AmtPaid),
-		AmtPaid:         int64(invoice.AmtPaid),
 		State:           state,
 		Htlcs:           rpcHtlcs,
 		Features:        CreateRPCFeatures(invoice.Terms.Features),
@@ -188,7 +187,7 @@ func CreateRPCRouteHints(routeHints [][]zpay32.HopHint) []*lnrpc.RouteHint {
 			)
 
 			hint := &lnrpc.HopHint{
-				NodeId:                    pubKey,
+				NodeId:                    []byte(pubKey),
 				ChanId:                    hop.ChannelID,
 				FeeBaseMsat:               hop.FeeBaseMSat,
 				FeeProportionalMillionths: hop.FeeProportionalMillionths,
@@ -212,7 +211,7 @@ func CreateZpay32HopHints(routeHints []*lnrpc.RouteHint) ([][]zpay32.HopHint, er
 	for _, route := range routeHints {
 		hopHints := make([]zpay32.HopHint, 0, len(route.HopHints))
 		for _, hop := range route.HopHints {
-			pubKeyBytes, err := util.DecodeHex(hop.NodeId)
+			pubKeyBytes, err := util.DecodeHex(string(hop.NodeId))
 			if err != nil {
 				return nil, err
 			}

@@ -11,7 +11,6 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/lnd/lncfg"
 	"github.com/pkt-cash/pktd/lnd/lnrpc"
-	"github.com/pkt-cash/pktd/lnd/walletunlocker"
 	"github.com/urfave/cli"
 	"gopkg.in/macaroon.v2"
 )
@@ -24,14 +23,13 @@ var (
 // profileEntry is a struct that represents all settings for one specific
 // profile.
 type profileEntry struct {
-	Name        string       `json:"name"`
-	RPCServer   string       `json:"rpcserver"`
-	LndDir      string       `json:"lnddir"`
-	Chain       string       `json:"chain"`
-	Network     string       `json:"network"`
-	NoMacaroons bool         `json:"no-macaroons,omitempty"`
-	TLSCert     string       `json:"tlscert"`
-	Macaroons   *macaroonJar `json:"macaroons"`
+	Name      string `json:"name"`
+	RPCServer string `json:"rpcserver"`
+	LndDir    string `json:"lnddir"`
+	PktDir    string `json:"pktdir"`
+	Chain     string `json:"chain"`
+	Network   string `json:"network"`
+	TLSCert   string `json:"tlscert"`
 }
 
 // cert returns the profile's TLS certificate as a x509 certificate pool.
@@ -53,6 +51,10 @@ func (e *profileEntry) cert() (*x509.CertPool, er.R) {
 // profile exists, the global options from the command line are returned as an
 // ephemeral profile entry.
 func getGlobalOptions(ctx *cli.Context, skipMacaroons bool) (*profileEntry, er.R) {
+
+	//	we want to disable the use of macaroons so, force that it's turned off
+	_ = skipMacaroons
+	skipMacaroons = true
 
 	var profileName string
 
@@ -113,9 +115,14 @@ func getGlobalOptions(ctx *cli.Context, skipMacaroons bool) (*profileEntry, er.R
 func profileFromContext(ctx *cli.Context, store, skipMacaroons bool) (
 	*profileEntry, er.R) {
 
+	//	we want to disable the use of macaroons so, force that it's turned off
+	//	ctx.GlobalSet("no-macaroons", "true")
+	_ = skipMacaroons
+	skipMacaroons = true
+
 	// Parse the paths of the cert and macaroon. This will validate the
 	// chain and network value as well.
-	tlsCertPath, macPath, err := extractPathArgs(ctx)
+	tlsCertPath, macPath, pktDir, err := extractPathArgs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -133,12 +140,12 @@ func profileFromContext(ctx *cli.Context, store, skipMacaroons bool) (
 	}
 
 	entry := &profileEntry{
-		RPCServer:   ctx.GlobalString("rpcserver"),
-		LndDir:      lncfg.CleanAndExpandPath(ctx.GlobalString("lnddir")),
-		Chain:       ctx.GlobalString("chain"),
-		Network:     ctx.GlobalString("network"),
-		NoMacaroons: ctx.GlobalBool("no-macaroons"),
-		TLSCert:     string(tlsCert),
+		RPCServer: ctx.GlobalString("rpcserver"),
+		LndDir:    lncfg.CleanAndExpandPath(ctx.GlobalString("lnddir")),
+		PktDir:    pktDir,
+		Chain:     ctx.GlobalString("chain"),
+		Network:   ctx.GlobalString("network"),
+		TLSCert:   string(tlsCert),
 	}
 
 	// If we aren't using macaroons in general (flag --no-macaroons) or
@@ -165,8 +172,7 @@ func profileFromContext(ctx *cli.Context, store, skipMacaroons bool) (
 		// encrypt the macaroon and store it plaintext.
 		pw, err = capturePassword(
 			"Enter password to encrypt macaroon with or leave "+
-				"blank to store in plaintext: ", true,
-			walletunlocker.ValidatePassword,
+				"blank to store in plaintext: ", true, nil,
 		)
 		if err != nil {
 			return nil, er.Errorf("unable to get encryption "+
@@ -183,15 +189,6 @@ func profileFromContext(ctx *cli.Context, store, skipMacaroons bool) (
 	macEntry.Name = path.Base(macPath)
 	if path.Ext(macEntry.Name) == "macaroon" {
 		macEntry.Name = strings.TrimSuffix(macEntry.Name, ".macaroon")
-	}
-
-	// Now that we have the macaroon jar as well, let's return the entry
-	// with all the values populated.
-	entry.Macaroons = &macaroonJar{
-		Default: macEntry.Name,
-		Timeout: ctx.GlobalInt64("macaroontimeout"),
-		IP:      ctx.GlobalString("macaroonip"),
-		Jar:     []*macaroonEntry{macEntry},
 	}
 
 	return entry, nil

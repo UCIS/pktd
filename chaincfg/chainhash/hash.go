@@ -8,7 +8,10 @@ package chainhash
 import (
 	"encoding/hex"
 	"fmt"
+	"unsafe"
 
+	jsoniter "github.com/json-iterator/go"
+	"github.com/modern-go/reflect2"
 	"github.com/pkt-cash/pktd/btcutil/er"
 )
 
@@ -26,6 +29,23 @@ var ErrHashStrSize = er.GenericErrorType.CodeWithDetail("ErrHashStrSize",
 // Hash is used in several of the bitcoin messages and common structures.  It
 // typically represents the double sha256 of data.
 type Hash [HashSize]byte
+
+func init() {
+	t := reflect2.TypeOf(Hash{}).String()
+	jsoniter.RegisterTypeDecoderFunc(t, func(ptr unsafe.Pointer, iter *jsoniter.Iterator) {
+		s := iter.ReadString()
+		h, err := NewHashFromStr(s)
+		if err != nil {
+			iter.Error = err.Native()
+		} else {
+			*((*Hash)(ptr)) = *h
+		}
+	})
+	jsoniter.RegisterTypeEncoderFunc(t, func(ptr unsafe.Pointer, stream *jsoniter.Stream) {
+		h := *((*Hash)(ptr))
+		stream.WriteString(h.String())
+	}, nil)
+}
 
 // String returns the Hash as the hexadecimal string of the byte-reversed
 // hash.

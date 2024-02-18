@@ -1946,6 +1946,11 @@ func (s *server) peerBootstrapper(numTargetPeers uint32,
 	// our bootstrappers in order to avoid duplicates.
 	ignore := make(map[autopilot.NodeID]struct{})
 
+	// Don't be silly and try to connect to self
+	var selfBytes [33]byte
+	copy(selfBytes[:], s.identityECDH.PubKey().SerializeCompressed())
+	ignore[selfBytes] = struct{}{}
+
 	// We'll start off by aggressively attempting connections to peers in
 	// order to be a part of the network as soon as possible.
 	s.initialPeerBootstrap(ignore, numTargetPeers, bootstrappers)

@@ -10,7 +10,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -19,9 +18,11 @@ import (
 
 	"github.com/pkt-cash/pktd/blockchain"
 	"github.com/pkt-cash/pktd/btcutil/er"
-	"github.com/pkt-cash/pktd/neutrino/banman"
+	"github.com/pkt-cash/pktd/connmgr/banmgr"
 	"github.com/pkt-cash/pktd/pktlog/log"
+	"github.com/pkt-cash/pktd/txscript/opcode"
 	"github.com/pkt-cash/pktd/txscript/params"
+	"github.com/pkt-cash/pktd/txscript/scriptbuilder"
 	"github.com/pkt-cash/pktd/wire/ruleerror"
 
 	"github.com/pkt-cash/pktd/btcec"
@@ -104,6 +105,7 @@ var rpcHandlers = map[string]struct {
 	"sendfrom":               {handler: sendFrom},
 	"sendmany":               {handler: sendMany},
 	"sendtoaddress":          {handler: sendToAddress},
+	"sendvote":               {handler: sendVote},
 	"settxfee":               {handler: setTxFee},
 	"signmessage":            {handler: signMessage},
 	"signrawtransaction":     {handlerChain: signRawTransaction},
@@ -174,7 +176,7 @@ func lazyApplyHandler(request *btcjson.Request, w *wallet.Wallet, chainClient ch
 	} else if hndlr.handler != nil {
 		return unm(func(cmd interface{}) (interface{}, er.R) { return hndlr.handler(cmd, w) })
 	} else if hndlr.handlerChain != nil {
-		err = btcjson.ErrRPCMisc.New("This RPC requires a connection to the blockchain", nil)
+		err = btcjson.ErrRPCMisc.New("The wallet is still initializing...", nil)
 	} else if hndlr.handlerNeutrino != nil {
 		err = btcjson.ErrRPCMisc.New("This RPC requires neutrino backend (not --userpc mode)", nil)
 	} else if hndlr.handlerRPC != nil {
@@ -353,6 +355,10 @@ func getAddressBalances(icmd interface{}, w *wallet.Wallet) (interface{}, er.R) 
 	} else {
 		results := make([]btcjson.GetAddressBalancesResult, 0, len(bals))
 		for addr, bal := range bals {
+			vote, err := w.GetVote(addr)
+			if err != nil {
+				return nil, err
+			}
 			results = append(results, btcjson.GetAddressBalancesResult{
 				Address: addr.EncodeAddress(),
 
@@ -369,6 +375,8 @@ func getAddressBalances(icmd interface{}, w *wallet.Wallet) (interface{}, er.R) 
 				Sunconfirmed: strconv.FormatInt(int64(bal.Unconfirmed), 10),
 
 				OutputCount: bal.OutputCount,
+
+				Vote: vote,
 			})
 		}
 		return results, nil
@@ -483,15 +491,13 @@ func getInfo(icmd interface{}, w *wallet.Wallet, chainClient chain.Interface) (i
 		for _, p := range neut.CS.Peers() {
 			ni.Peers = append(ni.Peers, p.Describe())
 		}
-		if err := neut.CS.BanStore().ForEachBannedAddr(func(
-			a *net.IPNet,
-			r banman.Reason,
-			t time.Time,
+		if err := neut.CS.BanMgr().ForEachIp(func(
+			bi banmgr.BanInfo,
 		) er.R {
 			ni.Bans = append(ni.Bans, btcjson.NeutrinoBan{
-				Addr:    a.String(),
-				Reason:  r.String(),
-				EndTime: t.String(),
+				Addr:    bi.Addr,
+				Reason:  bi.Reason,
+				EndTime: bi.BanExpiresTime.String(),
 			})
 			return nil
 		}); err != nil {
@@ -1190,7 +1196,7 @@ func sendOutputs(
 	fromAddressses *[]string,
 	minconf int32,
 	feeSatPerKb btcutil.Amount,
-	dryRun bool,
+	sendMode wallet.SendMode,
 	changeAddress *string,
 	inputMinHeight int,
 	maxInputs int,
@@ -1198,7 +1204,7 @@ func sendOutputs(
 	req := wallet.CreateTxReq{
 		Minconf:        minconf,
 		FeeSatPerKB:    feeSatPerKb,
-		DryRun:         dryRun,
+		SendMode:       sendMode,
 		InputMinHeight: inputMinHeight,
 		MaxInputs:      maxInputs,
 		Label:          "",
@@ -1223,7 +1229,7 @@ func sendOutputs(
 		}
 		req.ChangeAddress = &addr
 	}
-	if fromAddressses != nil {
+	if fromAddressses != nil && len(*fromAddressses) > 0 {
 		addrs := make([]btcutil.Address, 0, len(*fromAddressses))
 		for _, addrStr := range *fromAddressses {
 			addr, err := btcutil.DecodeAddress(addrStr, w.ChainParams())
@@ -1232,7 +1238,7 @@ func sendOutputs(
 			}
 			addrs = append(addrs, addr)
 		}
-		req.InputAddresses = &addrs
+		req.InputAddresses = addrs
 	}
 	tx, err := w.SendOutputs(req)
 	if err != nil {
@@ -1261,7 +1267,7 @@ func sendPairs(w *wallet.Wallet, amounts map[string]btcutil.Amount,
 		return "", err
 	}
 
-	tx, err := sendOutputs(w, amounts, vote, fromAddressses, minconf, feeSatPerKb, false, nil, inputMinHeight, maxInputs)
+	tx, err := sendOutputs(w, amounts, vote, fromAddressses, minconf, feeSatPerKb, wallet.SendModeBcasted, nil, inputMinHeight, maxInputs)
 	if err != nil {
 		return "", err
 	}
@@ -1273,6 +1279,122 @@ func sendPairs(w *wallet.Wallet, amounts map[string]btcutil.Amount,
 
 func isNilOrEmpty(s *string) bool {
 	return s == nil || *s == ""
+}
+
+func prepareTxReq(
+	w *wallet.Wallet,
+	amounts map[string]btcutil.Amount,
+	vote *waddrmgr.NetworkStewardVote,
+	fromAddressses *[]string,
+	minconf int32,
+	feeSatPerKb btcutil.Amount,
+	sendMode wallet.SendMode,
+	changeAddress *string,
+	inputMinHeight int,
+	maxInputs int,
+) (*wallet.CreateTxReq, er.R) {
+	req := wallet.CreateTxReq{
+		Minconf:        minconf,
+		FeeSatPerKB:    feeSatPerKb,
+		SendMode:       sendMode,
+		InputMinHeight: inputMinHeight,
+		MaxInputs:      maxInputs,
+		Label:          "",
+	}
+	if inputMinHeight > 0 {
+		// TODO(cjd): Ideally we would expose the comparator choice to the
+		// API consumer, but this is an API break. When we're using inputMinHeight
+		// it's normally because we're trying to do multiple createtransaction
+		// requests without double-spending, so it's important to prefer oldest
+		// in this case.
+		req.InputComparator = wallet.PreferOldest
+	}
+	var err er.R
+	req.Outputs, err = makeOutputs(amounts, vote, w.ChainParams())
+	if err != nil {
+		return nil, err
+	}
+	if changeAddress != nil && *changeAddress != "" {
+		addr, err := btcutil.DecodeAddress(*changeAddress, w.ChainParams())
+		if err != nil {
+			return nil, err
+		}
+		req.ChangeAddress = &addr
+	}
+	if fromAddressses != nil && len(*fromAddressses) > 0 {
+		addrs := make([]btcutil.Address, 0, len(*fromAddressses))
+		for _, addrStr := range *fromAddressses {
+			addr, err := btcutil.DecodeAddress(addrStr, w.ChainParams())
+			if err != nil {
+				return nil, err
+			}
+			addrs = append(addrs, addr)
+		}
+		req.InputAddresses = addrs
+	}
+	return &req, nil
+}
+
+func mkVoteScript(willingCandidate bool, voteFor []byte) ([]byte, er.R) {
+	buf := make([]byte, len(voteFor)+1)
+	if willingCandidate {
+		buf[0] = 0x01
+	}
+	copy(buf[1:], voteFor)
+	return scriptbuilder.NewScriptBuilder().AddOp(opcode.OP_RETURN).AddData(buf).Script()
+}
+
+func sendTxRequest(w *wallet.Wallet, req *wallet.CreateTxReq) (*txauthor.AuthoredTx, er.R) {
+	tx, err := w.SendOutputs(*req)
+	if err != nil {
+		if ruleerror.ErrNegativeTxOutValue.Is(err) {
+			return nil, er.New("amount must be positive")
+		}
+		if waddrmgr.ErrLocked.Is(err) {
+			return nil, er.New("Enter the wallet passphrase with `./bin/pktctl --wallet walletpassphrase` first")
+		}
+		if btcjson.Err.Is(err) {
+			return nil, err
+		}
+		return nil, btcjson.ErrRPCInternal.New("SendOutputs failed", err)
+	}
+	return tx, nil
+}
+
+func sendVote(icmd interface{}, w *wallet.Wallet) (interface{}, er.R) {
+	req := icmd.(*btcjson.SendVoteCmd)
+	minConf := int32(1)
+	if req.MinConf != nil {
+		minConf = int32(*req.MinConf)
+	}
+	minHeight := 0
+	if req.MinHeight != nil {
+		minHeight = int(*req.MinHeight)
+	}
+	maxInputs := 0
+	if req.MaxInputs != nil {
+		maxInputs = int(*req.MaxInputs)
+	}
+	if voteFor, err := btcutil.DecodeAddress(req.VoteFor, w.ChainParams()); err != nil {
+		return nil, err
+	} else if voteForScript, err := txscript.PayToAddrScriptWithVote(voteFor, nil, nil); err != nil {
+		return nil, er.Errorf("cannot create voteFor txout script: %s", err)
+	} else if txr, err := prepareTxReq(w, map[string]btcutil.Amount{}, nil,
+		&[]string{req.FromAddress}, minConf, txrules.DefaultRelayFeePerKb,
+		wallet.SendModeBcasted, nil, minHeight, maxInputs); err != nil {
+		return nil, err
+	} else if vscr, err := mkVoteScript(req.IsCandidate != nil && *req.IsCandidate, voteForScript); err != nil {
+		return nil, err
+	} else {
+		txr.Outputs = []*wire.TxOut{{Value: 0, PkScript: vscr}}
+		if atx, err := sendTxRequest(w, txr); err != nil {
+			return nil, err
+		} else {
+			txHashStr := atx.Tx.TxHash().String()
+			log.Infof("Successfully sent vote transaction [%s]", log.Txid(txHashStr))
+			return txHashStr, nil
+		}
+	}
 }
 
 // sendFrom handles a sendfrom RPC request by creating a new transaction
@@ -1360,8 +1482,13 @@ func createTransaction(icmd interface{}, w *wallet.Wallet) (interface{}, er.R) {
 		maxInputs = *cmd.MaxInputs
 	}
 
+	sendMode := wallet.SendModeSigned
+	if cmd.NoSign != nil && *cmd.NoSign {
+		sendMode = wallet.SendModeUnsigned
+	}
+
 	tx, err := sendOutputs(w, amounts, vote, cmd.FromAddresses, minconf,
-		feeSatPerKb, true, cmd.ChangeAddress, inputMinHeight, maxInputs)
+		feeSatPerKb, sendMode, cmd.ChangeAddress, inputMinHeight, maxInputs)
 	if err != nil {
 		return "", err
 	}

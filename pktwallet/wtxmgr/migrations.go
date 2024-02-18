@@ -1,10 +1,15 @@
 package wtxmgr
 
 import (
+	"github.com/pkt-cash/pktd/blockchain"
 	"github.com/pkt-cash/pktd/btcutil/er"
+	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb/migration"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/unspent"
+	"github.com/pkt-cash/pktd/txscript"
 )
 
 // versions is a list of the different database versions. The last entry should
@@ -19,6 +24,10 @@ var versions = []migration.Version{
 	{
 		Number:    2,
 		Migration: DropTransactionHistory,
+	},
+	{
+		Number:    3,
+		Migration: ExtendUnspent,
 	},
 }
 
@@ -104,5 +113,32 @@ func DropTransactionHistory(ns walletdb.ReadWriteBucket) er.R {
 		return err
 	}
 
+	return nil
+}
+
+func ExtendUnspent(ns walletdb.ReadWriteBucket) er.R {
+	log.Info("Adding extended data to unspent table")
+	count := 0
+	err := unspent.ExtendUnspents(ns, func(unspent *dbstructs.Unspent) er.R {
+		txr, err := fetchTxRecord(ns, &unspent.OutPoint.Hash, &unspent.Block)
+		if err != nil {
+			return err
+		}
+		if int(unspent.OutPoint.Index) >= len(txr.MsgTx.TxOut) {
+			return er.New("unspent.OutPoint.Index not in MsgTx")
+		}
+		op := txr.MsgTx.TxOut[unspent.OutPoint.Index]
+		// TODO(cjd): Incompatible w/ BTC
+		unspent.Address = txscript.PkScriptToAddress(op.PkScript, &chaincfg.PktMainNetParams).String()
+		unspent.Value = op.Value
+		unspent.FromCoinBase = blockchain.IsCoinBaseTx(&txr.MsgTx)
+		unspent.PkScript = op.PkScript
+		count += 1
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	log.Infof("Adding extended data to unspent table - done, [%d] entries", count)
 	return nil
 }

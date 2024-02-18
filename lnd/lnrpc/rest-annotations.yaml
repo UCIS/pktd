@@ -9,7 +9,8 @@ http:
     - selector: lnrpc.Lightning.ChannelBalance
       get: "/v1/balance/channels"
     - selector: lnrpc.Lightning.GetTransactions
-      get: "/v1/transactions"
+      post: "/v1/transactions"
+      body: "*"
     - selector: lnrpc.Lightning.EstimateFee
       get: "/v1/transactions/fee"
     - selector: lnrpc.Lightning.SendCoins
@@ -139,6 +140,54 @@ http:
       delete: "/v1/macaroon/{root_key_id}"
     - selector: lnrpc.Lightning.ListPermissions
       get: "/v1/macaroon/permissions"
+    # ported pktwallet commands
+    - selector: lnrpc.Lightning.GetAddressBalances
+      get: "/pkt/v1/getaddressbalances"
+    - selector: lnrpc.Lightning.ReSync
+      post: "/pkt/v1/resync"
+      body: "*"
+    - selector: lnrpc.Lightning.StopReSync
+      get: "/pkt/v1/stopresync"
+    - selector: lnrpc.Lightning.GetWalletSeed
+      get: "/pkt/v1/getwalletseed"
+    - selector: lnrpc.Lightning.GetSecret
+      get: "/pkt/v1/getsecret/{name}"
+    - selector: lnrpc.Lightning.ListLockUnspent
+      get: "/pkt/v1/listlockunspent"
+    - selector: lntpc.Lightning.LockUnspent
+      post: "/pkt/v1/lockunspent"
+      body: "*"
+    - selector: lnrpc.Lightning.CreateTransaction
+      post: "/pkt/v1/createtransaction"
+      body: "*"
+    - selector: lnrpc.Lightning.DumpPrivKey
+      get: "/pkt/v1/dumpprivkey/{address}"
+    - selector: lnrpc.Lightning.ImportPrivKey
+      post: "/pkt/v1/importprivkey"
+      body: "*"  
+    - selector: lnrpc.Lightning.GetNewAddress
+      post: "/pkt/v1/getnewaddress/{legacy}"
+      body: "*"
+    - selector: lnrpc.Lightning.GetTransaction      
+      get: "/pkt/v1/gettransaction/{txid}"
+    - selector: lnrpc.Lightning.GetNetworkStewardVote
+      get: "/pkt/v1/getnetworkstewardvote"
+    - selector: lnrpc.Lightning.SetNetworkStewardVote  
+      post: "/pkt/v1/setnetworkstewardvote"
+      body: "*"
+    - selector: lnrpc.Lightning.BcastTransaction
+      post: "/pkt/v1/BcastTransaction"
+      body: "*"  
+    - selector: lnrpc.Lightning.SendFrom
+      post: "/pkt/v1/sendfrom"
+      body: "*"   
+
+    # metaservice.proto
+    - selector: lnrpc.MetaService.ChangePassword
+      post: "/pkt/v1/changepassword"
+      body: "*"
+    - selector: lnrpc.MetaService.GetInfo2
+      get: "/pkt/v1/getinfo2"
 
     # walletunlocker.proto
     - selector: lnrpc.WalletUnlocker.GenSeed
@@ -149,9 +198,9 @@ http:
     - selector: lnrpc.WalletUnlocker.UnlockWallet
       post: "/v1/unlockwallet"
       body: "*"
-    - selector: lnrpc.WalletUnlocker.ChangePassword
-      post: "/v1/changepassword"
-      body: "*"
+    - selector: lnrpc.WalletUnlocker.CreateWallet
+      post: "/pkt/v1/createwallet"
+      body: "*"     
 
     # autopilotrpc/autopilot.proto
     - selector: autopilotrpc.Autopilot.Status

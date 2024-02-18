@@ -70,7 +70,7 @@ func testSingleHopInvoice(net *lntest.NetworkHarness, t *harnessTest) {
 			FeeLimitMsat:   noFeeLimitMsat,
 		},
 	)
-	if hex.EncodeToString(preimage) != resp.PaymentPreimage {
+	if hex.EncodeToString(preimage) != string(resp.PaymentPreimage) {
 		t.Fatalf("preimage mismatch: expected %v, got %v", preimage,
 			resp.PaymentPreimage)
 	}
@@ -170,7 +170,7 @@ func testSingleHopInvoice(net *lntest.NetworkHarness, t *harnessTest) {
 		{
 			HopHints: []*lnrpc.HopHint{
 				{
-					NodeId:                    bobPubKey,
+					NodeId:                    net.Bob.PubKey[:],
 					ChanId:                    hintChannel.ToUint64(),
 					FeeBaseMsat:               1,
 					FeeProportionalMillionths: 1000000,
@@ -207,7 +207,7 @@ func testSingleHopInvoice(net *lntest.NetworkHarness, t *harnessTest) {
 		t.Fatalf("wrong FeeProportionalMillionths %v",
 			hopHint.FeeProportionalMillionths)
 	}
-	if hopHint.NodeId != bobPubKey {
+	if hex.EncodeToString(hopHint.NodeId) != bobPubKey {
 		t.Fatalf("wrong NodeId %v",
 			hopHint.NodeId)
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/unspent"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/utilfun"
 	"github.com/pkt-cash/pktd/wire"
 )
 
@@ -32,8 +34,9 @@ func (s *Store) insertMemPoolTx(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R
 	// transaction's outputs to determine if we've already seen them to
 	// prevent from adding this transaction to the unconfirmed bucket.
 	for i := range rec.MsgTx.TxOut {
-		k := canonicalOutPoint(&rec.Hash, uint32(i))
-		if existsRawUnspent(ns, k) != nil {
+		if uns, err := unspent.Get(ns, &wire.OutPoint{Hash: rec.Hash, Index: uint32(i)}); err != nil {
+			return err
+		} else if uns != nil {
 			return nil
 		}
 	}
@@ -50,7 +53,7 @@ func (s *Store) insertMemPoolTx(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R
 
 	for _, input := range rec.MsgTx.TxIn {
 		prevOut := &input.PreviousOutPoint
-		k := canonicalOutPoint(&prevOut.Hash, prevOut.Index)
+		k := utilfun.CanonicalOutPoint(&prevOut.Hash, prevOut.Index)
 		err = putRawUnminedInput(ns, k, rec.Hash[:])
 		if err != nil {
 			return err
@@ -70,7 +73,7 @@ func (s *Store) insertMemPoolTx(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R
 func (s *Store) removeDoubleSpends(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R {
 	for _, input := range rec.MsgTx.TxIn {
 		prevOut := &input.PreviousOutPoint
-		prevOutKey := canonicalOutPoint(&prevOut.Hash, prevOut.Index)
+		prevOutKey := utilfun.CanonicalOutPoint(&prevOut.Hash, prevOut.Index)
 
 		doubleSpendHashes := fetchUnminedInputSpendTxHashes(ns, prevOutKey)
 		for _, doubleSpendHash := range doubleSpendHashes {
@@ -121,7 +124,7 @@ func removeConflict(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R {
 	// be recursively removed as well.  Once the spenders are removed, the
 	// credit is deleted.
 	for i := range rec.MsgTx.TxOut {
-		k := canonicalOutPoint(&rec.Hash, uint32(i))
+		k := utilfun.CanonicalOutPoint(&rec.Hash, uint32(i))
 		spenderHashes := fetchUnminedInputSpendTxHashes(ns, k)
 		for _, spenderHash := range spenderHashes {
 			// If the spending transaction spends multiple outputs
@@ -157,7 +160,7 @@ func removeConflict(ns walletdb.ReadWriteBucket, rec *TxRecord) er.R {
 	// output in the unmined inputs bucket.
 	for _, input := range rec.MsgTx.TxIn {
 		prevOut := &input.PreviousOutPoint
-		k := canonicalOutPoint(&prevOut.Hash, prevOut.Index)
+		k := utilfun.CanonicalOutPoint(&prevOut.Hash, prevOut.Index)
 		err := deleteRawUnminedInput(ns, k, rec.Hash)
 		if err != nil {
 			return err

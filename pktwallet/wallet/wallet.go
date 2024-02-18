@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/emirpasic/gods/utils"
+	"github.com/pkt-cash/pktd/blockchain/votecompute/votes"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/neutrino/pushtx"
 	"github.com/pkt-cash/pktd/pktlog/log"
@@ -27,7 +28,7 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/hdkeychain"
 	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
-	"github.com/pkt-cash/pktd/chaincfg/genesis"
+	"github.com/pkt-cash/pktd/chaincfg/globalcfg"
 	"github.com/pkt-cash/pktd/pktwallet/chain"
 	"github.com/pkt-cash/pktd/pktwallet/waddrmgr"
 	"github.com/pkt-cash/pktd/pktwallet/wallet/seedwords"
@@ -38,6 +39,8 @@ import (
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb/migration"
 	"github.com/pkt-cash/pktd/pktwallet/wtxmgr"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/unspent"
 	"github.com/pkt-cash/pktd/txscript"
 	"github.com/pkt-cash/pktd/wire"
 )
@@ -120,6 +123,7 @@ type Wallet struct {
 	lockState          chan bool
 	changePassphrase   chan changePassphraseRequest
 	changePassphrases  chan changePassphrasesRequest
+	checkPassphrase    chan checkPassphrasesRequest
 
 	NtfnServer *NotificationServer
 
@@ -146,6 +150,14 @@ type rescanJob struct {
 	name       string
 	dropDb     bool
 }
+
+type CoinbaseSelector int
+
+const (
+	coinbaseInclude CoinbaseSelector = 0
+	coinbaseExclude                  = 1
+	coinbaseOnly                     = 2
+)
 
 func (w *Wallet) Database() walletdb.DB {
 	return w.db
@@ -336,7 +348,7 @@ func (w *Wallet) SetChainSynced(synced bool) {
 // activeData returns the currently-active receiving addresses and all unspent
 // outputs.  This is primarely intended to provide the parameters for a
 // rescan request.
-func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]btcutil.Address, []wtxmgr.Credit, er.R) {
+func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]btcutil.Address, map[string][]watcher.OutPointWatch, er.R) {
 	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
 	txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
@@ -358,8 +370,21 @@ func (w *Wallet) activeData(dbtx walletdb.ReadWriteTx) ([]btcutil.Address, []wtx
 		return nil, nil, err
 	}
 
-	unspent, err := w.TxStore.GetUnspentOutputs(txmgrNs)
-	return addrs, unspent, err
+	ao := make(map[string][]watcher.OutPointWatch)
+	err = unspent.ForEachUnspentOutput(txmgrNs, nil, func(_ []byte, uns *dbstructs.Unspent) er.R {
+		a, err := btcutil.DecodeAddress(uns.Address, w.chainParams)
+		if err != nil {
+			log.Warnf("Unable to decode address [%s] from unspent [%s]", uns.Address, uns.OutPoint.String())
+			return nil
+		}
+		ao[uns.Address] = append(ao[uns.Address], watcher.OutPointWatch{
+			BeginHeight: uns.Block.Height,
+			OutPoint:    uns.OutPoint,
+			Addr:        a,
+		})
+		return nil
+	})
+	return addrs, ao, err
 }
 
 // syncWithChain brings the wallet up to date with the current chain server
@@ -454,31 +479,31 @@ func (w *Wallet) syncWithChain(birthdayStamp *waddrmgr.BlockStamp) er.R {
 		ws.BirthdayBlock = birthdayStamp.Height
 	})
 
+	log.Infof("Getting UTXOs and addresses to watch...")
+
 	// Finally, we'll trigger a wallet rescan and request notifications for
 	// transactions sending to all wallet addresses and spending all wallet
 	// UTXOs.
 	//func (w *Wallet) activeData(dbtx walletdb.ReadTx) ([]btcutil.Address, []wtxmgr.Credit, er.R) {
 	var addrs []btcutil.Address
-	var credits []wtxmgr.Credit
+	var ao map[string][]watcher.OutPointWatch
 	if err := walletdb.Update(w.db, func(dbtx walletdb.ReadWriteTx) er.R {
-		addrs, credits, err = w.activeData(dbtx)
+		addrs, ao, err = w.activeData(dbtx)
 		return err
 	}); err != nil {
 		return err
 	}
-	ao := make([]watcher.OutPointWatch, 0, len(credits))
-	for _, c := range credits {
-		ao = append(ao, watcher.OutPointWatch{
-			BeginHeight: c.Block.Height,
-			OutPoint:    c.OutPoint,
-			Addr:        txscript.PkScriptToAddress(c.PkScript, w.chainParams),
-		})
+	for addr, pts := range ao {
+		log.Infof("Watching address [%s] for [%s] UTXOs", log.Address(addr), log.Int(len(pts)))
 	}
 	for _, a := range addrs {
-		log.Debugf("Watching address [%s]", a.String())
+		addr := a.String()
+		if _, ok := ao[addr]; !ok {
+			log.Debugf("Watching address [%s] for [%s] UTXOs", addr, 0)
+		}
 	}
 	w.watch.WatchAddrs(addrs)
-	w.watch.WatchOutpoints(ao)
+	w.watch.WatchOutpointsMap(ao)
 
 	return nil
 }
@@ -611,12 +636,13 @@ func getBlockStamp(chainClient chain.Interface, height int32) (*waddrmgr.BlockSt
 }
 
 type (
+	SendMode    uint8
 	CreateTxReq struct {
-		InputAddresses  *[]btcutil.Address
+		InputAddresses  []btcutil.Address
 		Outputs         []*wire.TxOut
 		Minconf         int32
 		FeeSatPerKB     btcutil.Amount
-		DryRun          bool
+		SendMode        SendMode
 		ChangeAddress   *btcutil.Address
 		InputMinHeight  int
 		InputComparator utils.Comparator
@@ -631,6 +657,12 @@ type (
 		tx  *txauthor.AuthoredTx
 		err er.R
 	}
+)
+
+const (
+	SendModeUnsigned SendMode = 0
+	SendModeSigned   SendMode = 1
+	SendModeBcasted  SendMode = 2
 )
 
 // txCreator is responsible for the input selection and creation of
@@ -649,13 +681,19 @@ out:
 	for {
 		select {
 		case txr := <-w.createTxRequests:
-			heldUnlock, err := w.holdUnlock()
-			if err != nil {
-				txr.resp <- createTxResponse{nil, err}
-				continue
+			var hu heldUnlock
+			if txr.req.SendMode > SendModeUnsigned {
+				h, err := w.holdUnlock()
+				if err != nil {
+					txr.resp <- createTxResponse{nil, err}
+					continue
+				}
+				hu = h
 			}
 			tx, err := w.txToOutputs(txr.req)
-			heldUnlock.release()
+			if hu != nil {
+				hu.release()
+			}
 			txr.resp <- createTxResponse{tx, err}
 		case <-quit:
 			break out
@@ -700,6 +738,12 @@ type (
 		publicOld, publicNew   []byte
 		privateOld, privateNew []byte
 		err                    chan er.R
+	}
+
+	checkPassphrasesRequest struct {
+		publicPassphrase  []byte
+		privatePassphrase []byte
+		err               chan er.R
 	}
 
 	// heldUnlock is a tool to prevent the wallet from automatically
@@ -762,6 +806,15 @@ out:
 					addrmgrNs, req.privateOld, req.privateNew,
 					true, &waddrmgr.DefaultScryptOptions,
 				)
+			})
+			req.err <- err
+			continue
+
+		case req := <-w.checkPassphrase:
+			err := walletdb.View(w.db, func(tx walletdb.ReadTx) er.R {
+				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+
+				return w.Manager.CheckPassphrase(addrmgrNs, req.privatePassphrase)
 			})
 			req.err <- err
 			continue
@@ -891,6 +944,19 @@ func (w *Wallet) ChangePassphrases(publicOld, publicNew, privateOld,
 	return <-err
 }
 
+//	CheckPassphrases verifies the public and private passphrase of the wallet
+func (w *Wallet) CheckPassphrase(publicPw, walletPassphrase []byte) er.R {
+
+	err := make(chan er.R, 1)
+	w.checkPassphrase <- checkPassphrasesRequest{
+		publicPassphrase:  publicPw,
+		privatePassphrase: walletPassphrase,
+		err:               err,
+	}
+
+	return <-err
+}
+
 // AccountAddresses returns the addresses for every created address for an
 // account.
 func (w *Wallet) AccountAddresses(account uint32) (addrs []btcutil.Address, err er.R) {
@@ -974,37 +1040,38 @@ func (w *Wallet) CalculateAddressBalances(
 			if err := w.Manager.ForEachActiveAddress(addrmgrNs, func(addr btcutil.Address) er.R {
 				_bal := Balances{}
 				bal := &_bal
-				bals0[string(addr.ScriptAddress())] = bal
+				bals0[addr.String()] = bal
 				bals[addr] = bal
 				return nil
 			}); err != nil {
 				return err
 			}
 		}
-		return w.TxStore.ForEachUnspentOutput(txmgrNs, nil, func(_ []byte, output *wtxmgr.Credit) er.R {
-			if _, addrs, _, err := txscript.ExtractPkScriptAddrs(output.PkScript, w.chainParams); err != nil {
+		_, err := w.TxStore.ForEachUnspentOutput(txmgrNs, nil, nil, func(_ []byte, uns *dbstructs.Unspent) er.R {
+			if a, err := btcutil.DecodeAddress(uns.Address, w.chainParams); err != nil {
 				return err
-			} else if len(addrs) > 0 {
-				bal := bals0[string(addrs[0].ScriptAddress())]
+			} else {
+				bal := bals0[uns.Address]
 				if bal == nil {
 					_bal := Balances{}
+					bals0[uns.Address] = &_bal
+					bals[a] = &_bal
 					bal = &_bal
-					bals0[string(addrs[0].ScriptAddress())] = bal
-					bals[addrs[0]] = bal
 				}
-				bal.Total += output.Amount
+				bal.Total += btcutil.Amount(uns.Value)
 				bal.OutputCount++
-				if output.FromCoinBase && !confirmed(int32(w.chainParams.CoinbaseMaturity),
-					output.Height, syncBlock.Height) {
-					bal.ImmatureReward += output.Amount
-				} else if confirmed(confirms, output.Height, syncBlock.Height) {
-					bal.Spendable += output.Amount
+				if uns.FromCoinBase && !confirmed(int32(w.chainParams.CoinbaseMaturity),
+					uns.Block.Height, syncBlock.Height) {
+					bal.ImmatureReward += btcutil.Amount(uns.Value)
+				} else if confirmed(confirms, uns.Block.Height, syncBlock.Height) {
+					bal.Spendable += btcutil.Amount(uns.Value)
 				} else {
-					bal.Unconfirmed += output.Amount
+					bal.Unconfirmed += btcutil.Amount(uns.Value)
 				}
 			}
 			return nil
 		})
+		return err
 	})
 }
 
@@ -1577,6 +1644,8 @@ type GetTransactionsResult struct {
 // Block structure which records properties about the block.
 func (w *Wallet) GetTransactions(
 	startBlock, endBlock *BlockIdentifier,
+	limit, skip, //0 means no limit imposed
+	coinbase int32, reversed bool,
 	cancel <-chan struct{},
 ) (*GetTransactionsResult, er.R) {
 	var start, end int32 = 0, -1
@@ -1638,8 +1707,10 @@ func (w *Wallet) GetTransactions(
 			}
 		}
 	}
-
+	log.Infof("Default skip: %d, limit:%d, coinbase:%d\n", skip, limit, coinbase)
 	var res GetTransactionsResult
+	var totalTxns = 0
+	var skippedtxns int32 = 0
 	err := walletdb.View(w.db, func(dbtx walletdb.ReadTx) er.R {
 		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
 
@@ -1649,7 +1720,6 @@ func (w *Wallet) GetTransactions(
 			dets := make([]wtxmgr.TxDetails, len(details))
 			copy(dets, details)
 			details = dets
-
 			txs := make([]TransactionSummary, 0, len(details))
 			for i := range details {
 				txs = append(txs, makeTxSummary(dbtx, w, &details[i]))
@@ -1657,16 +1727,47 @@ func (w *Wallet) GetTransactions(
 
 			if details[0].Block.Height != -1 {
 				blockHash := details[0].Block.Hash
-				res.MinedTransactions = append(res.MinedTransactions, Block{
-					Hash:         &blockHash,
-					Height:       details[0].Block.Height,
-					Timestamp:    details[0].Block.Time.Unix(),
-					Transactions: txs,
-				})
-			} else {
-				res.UnminedTransactions = txs
+				if (details[0].MsgTx.TxIn[0].PreviousOutPoint.Hash.IsEqual(&chainhash.Hash{0000000000000000000000000000000000000000000000000000000000000000})) {
+					if coinbase == coinbaseExclude {
+						txs = txs[1:]
+					} else if coinbase == coinbaseOnly {
+						txs = txs[:1]
+					}
+				}
+				//Skipping transactions
+				if (skippedtxns + int32(len(txs))) < skip {
+					skippedtxns += int32(len(txs))
+				} else {
+					if skippedtxns < skip {
+						txs = txs[skip-skippedtxns:]
+						skippedtxns += int32(skip - skippedtxns)
+					}
+
+					res.MinedTransactions = append(res.MinedTransactions, Block{
+						Hash:         &blockHash,
+						Height:       details[0].Block.Height,
+						Timestamp:    details[0].Block.Time.Unix(),
+						Transactions: txs,
+					})
+					totalTxns += len(txs)
+				}
+			} else if coinbase != coinbaseOnly {
+				if (skippedtxns + int32(len(txs))) < skip {
+					skippedtxns += int32(len(txs))
+				} else {
+					if skippedtxns < skip {
+						txs = txs[skip-skippedtxns:]
+						skippedtxns += int32(skip - skippedtxns)
+					}
+					res.UnminedTransactions = txs
+					totalTxns += len(txs)
+				}
 			}
 
+			if (limit > 0) && (totalTxns >= int(limit)) {
+				log.Infof("Limit on number of transactions was reached %d", limit)
+				return true, nil
+			}
 			select {
 			case <-cancel:
 				return true, nil
@@ -1674,8 +1775,10 @@ func (w *Wallet) GetTransactions(
 				return false, nil
 			}
 		}
-
-		return w.TxStore.RangeTransactions(txmgrNs, start, end, rangeFn)
+		if !reversed {
+			return w.TxStore.RangeTransactions(txmgrNs, start, end, rangeFn)
+		}
+		return w.TxStore.RangeTransactions(txmgrNs, end, start, rangeFn)
 	})
 	return &res, err
 }
@@ -1690,22 +1793,18 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 
 	var results []*btcjson.ListUnspentResult
 	err := walletdb.View(w.db, func(tx walletdb.ReadTx) er.R {
-		addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
 		txmgrNs := tx.ReadBucket(wtxmgrNamespaceKey)
 
 		syncBlock := w.Manager.SyncedTo()
 
-		filter := len(addresses) != 0
-		defaultAccountName := "default"
-
 		results = make([]*btcjson.ListUnspentResult, 0)
-		w.TxStore.ForEachUnspentOutput(txmgrNs, nil, func(key []byte, output *wtxmgr.Credit) er.R {
+		w.TxStore.ForEachUnspentOutput(txmgrNs, nil, addresses, func(key []byte, uns *dbstructs.Unspent) er.R {
 
 			// Only mature coinbase outputs are included.
 			immature := false
-			if output.FromCoinBase {
+			if uns.FromCoinBase {
 				target := int32(w.ChainParams().CoinbaseMaturity)
-				if !confirmed(target, output.Height, syncBlock.Height) {
+				if !confirmed(target, uns.Block.Height, syncBlock.Height) {
 					immature = true
 					if minconf > 0 {
 						return nil
@@ -1715,49 +1814,23 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 
 			// Outputs with fewer confirmations than the minimum or more
 			// confs than the maximum are excluded.
-			confs := confirms(output.Height, syncBlock.Height)
+			confs := confirms(uns.Block.Height, syncBlock.Height)
 			if confs < minconf || confs > maxconf {
 				return nil
 			}
 
 			// Exclude locked outputs from the result set.
-			if w.LockedOutpoint(output.OutPoint) {
+			if w.LockedOutpoint(uns.OutPoint) {
 				return nil
 			}
 
-			// Lookup the associated account for the output.  Use the
-			// default account name in case there is no associated account
-			// for some reason, although this should never happen.
-			//
-			// This will be unnecessary once transactions and outputs are
-			// grouped under the associated account in the db.
-			acctName := defaultAccountName
-			sc, addrs, _, err := txscript.ExtractPkScriptAddrs(
-				output.PkScript, w.chainParams)
+			addr, err := btcutil.DecodeAddress(uns.Address, w.chainParams)
 			if err != nil {
-				return nil
-			}
-			if len(addrs) > 0 {
-				smgr, acct, err := w.Manager.AddrAccount(addrmgrNs, addrs[0])
-				if err == nil {
-					s, err := smgr.AccountName(addrmgrNs, acct)
-					if err == nil {
-						acctName = s
-					}
-				}
-			}
-
-			if filter {
-				for _, addr := range addrs {
-					_, ok := addresses[addr.EncodeAddress()]
-					if ok {
-						goto include
-					}
-				}
+				log.Warnf("Unable to decode address [%s] from unspent [%s]",
+					uns.Address, uns.OutPoint.String())
 				return nil
 			}
 
-		include:
 			// At the moment watch-only addresses are not supported, so all
 			// recorded outputs that are not multisig are "spendable".
 			// Multisig outputs are only "spendable" if all keys are
@@ -1770,51 +1843,32 @@ func (w *Wallet) ListUnspent(minconf, maxconf int32,
 			// private key (currently it only checks whether the pubkey
 			// exists, since the private key is required at the moment).
 			var spendable bool
-		scSwitch:
-			switch sc {
-			case txscript.PubKeyHashTy:
-				spendable = true
-			case txscript.PubKeyTy:
-				spendable = true
-			case txscript.WitnessV0ScriptHashTy:
-				spendable = true
-			case txscript.WitnessV0PubKeyHashTy:
-				spendable = true
-			case txscript.MultiSigTy:
-				for _, a := range addrs {
-					_, err := w.Manager.Address(addrmgrNs, a)
-					if err == nil {
-						continue
-					}
-					if waddrmgr.ErrAddressNotFound.Is(err) {
-						break scSwitch
-					}
-					return err
-				}
-				spendable = true
+			switch addr.(type) {
+			case *btcutil.AddressPubKeyHash:
+				spendable = true // e.g. p7YoB7AyGH5Ub9T2xbYWce6d4nzqd9BnnJ
+			case *btcutil.AddressPubKey:
+				spendable = false // not used anymore, really at all
+			case *btcutil.AddressWitnessScriptHash:
+				// Probably a multisig, this wallet probably can't spend currently
+				spendable = false // e.g. pkt1q6hqsqhqdgqfd8t3xwgceulu7k9d9w5t2amath0qxyfjlvl3s3u4sjza2g2
+			case *btcutil.AddressWitnessPubKeyHash:
+				spendable = true // e.g. pkt1qnzlupduvhl3w4jsddhxvh2nm6ygtu95gnr3rlx your standard
+			case *btcutil.AddressNonStandard:
+				spendable = false // who knows, we represent like script:dGhpcyBpcyBhbiBleGFtcGxlCg==
 			}
 			spendable = spendable && !immature
 
-			result := &btcjson.ListUnspentResult{
-				TxID:          output.OutPoint.Hash.String(),
-				Vout:          output.OutPoint.Index,
-				Account:       acctName,
-				ScriptPubKey:  hex.EncodeToString(output.PkScript),
-				Amount:        output.Amount.ToBTC(),
+			results = append(results, &btcjson.ListUnspentResult{
+				TxID:          uns.OutPoint.Hash.String(),
+				Vout:          uns.OutPoint.Index,
+				Amount:        btcutil.Amount(uns.Value).ToBTC(),
+				ScriptPubKey:  hex.EncodeToString(uns.PkScript),
 				Confirmations: int64(confs),
-				Height:        int64(output.Height),
-				BlockHash:     output.Block.Hash.String(),
+				Height:        int64(uns.Block.Height),
+				BlockHash:     uns.Block.Hash.String(),
 				Spendable:     spendable,
-			}
-
-			// BUG: this should be a JSON array so that all
-			// addresses can be included, or removed (and the
-			// caller extracts addresses from the pkScript).
-			if len(addrs) > 0 {
-				result.Address = addrs[0].EncodeAddress()
-			}
-
-			results = append(results, result)
+				Address:       uns.Address,
+			})
 			return nil
 		})
 		return nil
@@ -1875,10 +1929,24 @@ func (w *Wallet) ImportPrivateKey(scope waddrmgr.KeyScope, wif *btcutil.WIF,
 	// The starting block for the key is the genesis block unless otherwise
 	// specified.
 	if bs == nil {
+		const secondBlockIndex = int64(1)
+
+		secondBlockHash, err := w.chainClient.GetBlockHash(secondBlockIndex)
+		if err != nil {
+			return "", err
+		}
+		secondBlockHeader, err := w.chainClient.GetBlockHeader(secondBlockHash)
+		if err != nil {
+			return "", err
+		}
+		secondBlockTimestamp := secondBlockHeader.Timestamp
+
+		log.Debugf("ImportPrivateKey() [1] second block -> height: %v; hash: %v; timestamp: %v", secondBlockIndex, secondBlockHash, secondBlockTimestamp)
+
 		bs = &waddrmgr.BlockStamp{
-			Hash:      *w.chainParams.GenesisHash,
-			Height:    0,
-			Timestamp: genesis.Block(w.chainParams.GenesisHash).Header.Timestamp,
+			Hash:      *secondBlockHash,
+			Height:    int32(secondBlockIndex),
+			Timestamp: secondBlockTimestamp,
 		}
 	} else if bs.Timestamp.IsZero() {
 		// Only update the new birthday time from default value if we
@@ -2165,7 +2233,9 @@ func (w *Wallet) SendOutputs(txr CreateTxReq) (*txauthor.AuthoredTx, er.R) {
 				return nil, er.New("Multiple outputs with zero value, a single output with zero value " +
 					"will sweep the address(es) to this output, multiple zero value outputs are ambiguous")
 			}
-			hasSweep = true
+			if votes.GetVote(output.PkScript) == nil {
+				hasSweep = true
+			}
 			continue
 		}
 		err := txrules.CheckOutput(
@@ -2184,11 +2254,11 @@ func (w *Wallet) SendOutputs(txr CreateTxReq) (*txauthor.AuthoredTx, er.R) {
 	if err != nil {
 		return nil, err
 	}
-	if txr.DryRun {
+	if txr.SendMode != SendModeBcasted {
 		return createdTx, nil
 	}
 
-	txHash, err := w.reliablyPublishTransaction(createdTx.Tx, txr.Label)
+	txHash, err := w.ReliablyPublishTransaction(createdTx.Tx, txr.Label)
 	if err != nil {
 		return nil, err
 	}
@@ -2370,7 +2440,7 @@ func (w *Wallet) SignTransaction(tx *wire.MsgTx, hashType params.SigHashType,
 // This function is unstable and will be removed once syncing code is moved out
 // of the wallet.
 func (w *Wallet) PublishTransaction(tx *wire.MsgTx, label string) er.R {
-	_, err := w.reliablyPublishTransaction(tx, label)
+	_, err := w.ReliablyPublishTransaction(tx, label)
 	return err
 }
 
@@ -2379,7 +2449,7 @@ func (w *Wallet) PublishTransaction(tx *wire.MsgTx, label string) er.R {
 // relevant database state, and finally possible removing the transaction from
 // the database (along with cleaning up all inputs used, and outputs created) if
 // the transaction is rejected by the backend.
-func (w *Wallet) reliablyPublishTransaction(tx *wire.MsgTx, label string) (*chainhash.Hash, er.R) {
+func (w *Wallet) ReliablyPublishTransaction(tx *wire.MsgTx, label string) (*chainhash.Hash, er.R) {
 	// We need to addRelevantTx this transaction so the user's next tx won't just keep
 	// on trying to spend the same money over and over, but it will get flushed on restarts
 	// because if the tx is invalid, the wallet would otherwise just remember it forever.
@@ -2581,6 +2651,15 @@ func (w *Wallet) StopResync() (string, er.R) {
 		return "", er.Errorf("No stoppable resync currently in progress")
 	}
 	w.rescanJ = nil
+
+	w.UpdateStats(func(ws *btcjson.WalletStats) {
+		ws.MaintenanceInProgress = false
+		ws.MaintenanceName = ""
+		ws.MaintenanceCycles = 0
+		ws.MaintenanceLastBlockVisited = 0
+	})
+	log.Info("Resync job stopped !")
+
 	return gj.name, nil
 }
 
@@ -2631,10 +2710,20 @@ func (w *Wallet) ResyncChain(fromHeight, toHeight int32, addresses []string, dro
 		}
 	}
 
+	//	same as for ImportPrivKey(), resync must starts from block 1 and not from genesis
+	effectiveFromHeight := fromHeight
+
+	if fromHeight == 0 {
+		const secondBlockIndex = int64(1)
+
+		effectiveFromHeight = int32(secondBlockIndex)
+		log.Debugf("ResyncChain() effectively starting from block %d", effectiveFromHeight)
+	}
+
 	w.rescanJ = &rescanJob{
 		name: fmt.Sprintf("resync_%d_to_%d_at_%d",
 			fromHeight, toHeight, time.Now().Unix()),
-		height:     fromHeight,
+		height:     effectiveFromHeight,
 		stopHeight: toHeight,
 		watch:      watch,
 		dropDb:     dropDb,
@@ -2676,7 +2765,7 @@ func paysUncreditedAddress(
 	for _, addr := range watchedAddrs {
 		script := addr.ScriptAddress()
 		for index, out := range tx.TxOut {
-			if !bytes.Equal(script, out.PkScript) {
+			if !bytes.Contains(out.PkScript, script) {
 				continue
 			}
 			found := false
@@ -2750,10 +2839,10 @@ func existsTxEntry(
 }
 
 func mkFilterReq(w *watcher.Watcher, header *wire.BlockHeader, height int32) *chain.FilterBlocksRequest {
-	filterReq := w.FilterReq(height)
+	filterReq := w.FilterReq(height, globalcfg.IgnoreMined)
 	filterReq.Blocks = []wtxmgr.BlockMeta{
 		{
-			Block: wtxmgr.Block{
+			Block: dbstructs.Block{
 				Hash:   header.BlockHash(),
 				Height: height,
 			},
@@ -2915,7 +3004,7 @@ func (w *Wallet) connectBlocks(blks []SyncerResp, isRescan bool) er.R {
 				return err
 			}
 			w.NtfnServer.notifyAttachedBlock(dbtx, &wtxmgr.BlockMeta{
-				Block: wtxmgr.Block{
+				Block: dbstructs.Block{
 					Hash:   hash,
 					Height: b.height,
 				},
@@ -3024,7 +3113,7 @@ func (w *Wallet) rollbackIfNeeded() er.R {
 	}
 }
 
-func (w *Wallet) block(bm wtxmgr.Block) er.R {
+func (w *Wallet) block(bm dbstructs.Block) er.R {
 	header, err := w.chainClient.GetBlockHeader(&bm.Hash)
 	if err != nil {
 		return err
@@ -3037,10 +3126,10 @@ func (w *Wallet) block(bm wtxmgr.Block) er.R {
 	}
 	if bm.Height == st.Height+1 && header.PrevBlock.IsEqual(&st.Hash) {
 		// Easy case, the new block is one more block than the one we have
-		filterReq := w.watch.FilterReq(bm.Height)
+		filterReq := w.watch.FilterReq(bm.Height, globalcfg.IgnoreMined)
 		filterReq.Blocks = []wtxmgr.BlockMeta{
 			{
-				Block: wtxmgr.Block{
+				Block: dbstructs.Block{
 					Hash:   header.BlockHash(),
 					Height: bm.Height,
 				},
@@ -3113,9 +3202,13 @@ func (w *Wallet) rescan() {
 		limit = rj.stopHeight
 	}
 	if rj.height >= limit {
+		log.Info("Resync job reached the chain tip! 👍")
+
 		w.UpdateStats(func(ws *btcjson.WalletStats) {
 			ws.MaintenanceInProgress = false
-			ws.MaintenanceName = rj.name
+			ws.MaintenanceName = ""
+			ws.MaintenanceCycles = 0
+			ws.MaintenanceLastBlockVisited = 0
 		})
 		return
 	}
@@ -3155,10 +3248,10 @@ func (w *Wallet) checkBlock() {
 	if st.Height >= bestHeight {
 		synced := w.ChainSynced()
 		if !synced {
-			log.Infof("Wallet frontend synced to tip [%d]", st.Height)
+			log.Infof("Wallet frontend synced to tip [%s] 💪", log.Height(st.Height))
 			w.SetChainSynced(true)
 		}
-	} else if err := w.block(wtxmgr.Block{
+	} else if err := w.block(dbstructs.Block{
 		Hash:   *bestH,
 		Height: bestHeight,
 	}); err != nil {
@@ -3267,6 +3360,7 @@ func Open(db walletdb.DB, pubPass []byte, cbs *waddrmgr.OpenCallbacks,
 		lockState:          make(chan bool),
 		changePassphrase:   make(chan changePassphraseRequest),
 		changePassphrases:  make(chan changePassphrasesRequest),
+		checkPassphrase:    make(chan checkPassphrasesRequest),
 		chainParams:        params,
 		quit:               make(chan struct{}),
 		watch:              watcher.New(),

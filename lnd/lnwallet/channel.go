@@ -27,7 +27,7 @@ import (
 	"github.com/pkt-cash/pktd/wire"
 )
 
-var zeroHash chainhash.Hash
+//var zeroHash chainhash.Hash
 
 var (
 	Err = er.NewErrorType("lnd.lnwallet")

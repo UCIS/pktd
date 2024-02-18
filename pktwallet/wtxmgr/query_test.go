@@ -14,6 +14,7 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
 	"github.com/pkt-cash/pktd/wire"
 )
 
@@ -225,11 +226,11 @@ func stripSerializedTx(rec *TxRecord) *TxRecord {
 
 func makeBlockMeta(height int32) BlockMeta {
 	if height == -1 {
-		return BlockMeta{Block: Block{Height: -1}}
+		return BlockMeta{Block: dbstructs.Block{Height: -1}}
 	}
 
 	b := BlockMeta{
-		Block: Block{Height: height},
+		Block: dbstructs.Block{Height: height},
 		Time:  timeNow(),
 	}
 	// Give it a fake block hash created from the height and time.
@@ -271,7 +272,7 @@ func TestStoreQueries(t *testing.T) {
 		{
 			{
 				TxRecord: *stripSerializedTx(recA),
-				Block:    BlockMeta{Block: Block{Height: -1}},
+				Block:    BlockMeta{Block: dbstructs.Block{Height: -1}},
 			},
 		},
 	}
@@ -318,7 +319,7 @@ func TestStoreQueries(t *testing.T) {
 	newState.blocks[0][0].Credits[0].Spent = true
 	newState.blocks[0] = append(newState.blocks[0], TxDetails{
 		TxRecord: *stripSerializedTx(recB),
-		Block:    BlockMeta{Block: Block{Height: -1}},
+		Block:    BlockMeta{Block: dbstructs.Block{Height: -1}},
 		Debits: []DebitRecord{
 			{
 				Amount: btcutil.Amount(recA.MsgTx.TxOut[0].Value),
@@ -425,7 +426,7 @@ func TestStoreQueries(t *testing.T) {
 		}
 		missingUniqueTests := []struct {
 			hash  *chainhash.Hash
-			block *Block
+			block *dbstructs.Block
 		}{
 			{&missingRec.Hash, &b100.Block},
 			{&missingRec.Hash, &missingBlock.Block},
@@ -605,7 +606,7 @@ func TestPreviousPkScripts(t *testing.T) {
 
 	type scriptTest struct {
 		rec     *TxRecord
-		block   *Block
+		block   *dbstructs.Block
 		scripts [][]byte
 	}
 	runTest := func(ns walletdb.ReadWriteBucket, tst *scriptTest) {

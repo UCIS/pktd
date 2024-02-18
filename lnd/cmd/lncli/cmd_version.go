@@ -13,10 +13,10 @@ import (
 
 var versionCommand = cli.Command{
 	Name:  "version",
-	Usage: "Display lncli and lnd version info.",
+	Usage: "Display pldctl and pld version info.",
 	Description: `
-	Returns version information about both lncli and lnd. If lncli is unable
-	to connect to lnd, the command fails but still prints the lncli version.
+	Returns version information about both pldctl and pld. If pldctl is unable
+	to connect to pld, the command fails but still prints the pldctl version.
 	`,
 	Action: actionDecorator(v),
 }
@@ -26,7 +26,7 @@ func v(ctx *cli.Context) er.R {
 	defer conn.Close()
 
 	versions := &lnclipb.VersionResponse{
-		Lncli: &verrpc.Version{
+		Pldctl: &verrpc.Version{
 			Version:       version.Version(),
 			AppMajor:      uint32(version.AppMajorVersion()),
 			AppMinor:      uint32(version.AppMinorVersion()),
@@ -41,9 +41,9 @@ func v(ctx *cli.Context) er.R {
 	lndVersion, err := client.GetVersion(ctxb, &verrpc.VersionRequest{})
 	if err != nil {
 		printRespJSON(versions)
-		return er.Errorf("unable fetch version from lnd: %v", err)
+		return er.Errorf("unable fetch version from pld: %v", err)
 	}
-	versions.Lnd = lndVersion
+	versions.Pld = lndVersion
 
 	printRespJSON(versions)
 

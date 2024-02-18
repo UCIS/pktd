@@ -1,20 +1,16 @@
+//go:build !rpctest
 // +build !rpctest
 
 package lnd
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
-	"io/ioutil"
 	"math/big"
 	"net"
-	"os"
 	"testing"
 	"time"
 )
@@ -60,6 +56,9 @@ func TestParseHexColor(t *testing.T) {
 // TestTLSAutoRegeneration creates an expired TLS certificate, to test that a
 // new TLS certificate pair is regenerated when the old pair expires. This is
 // necessary because the pair expires after a little over a year.
+/*
+//	this test case doesn't make sense anymore since the function getTLSConfig() was removed
+//	from the codebase and maybe TLS support will be removed from the codebase too
 func TestTLSAutoRegeneration(t *testing.T) {
 	tempDirPath, errr := ioutil.TempDir("", ".testLnd")
 	if errr != nil {
@@ -143,6 +142,7 @@ func TestTLSAutoRegeneration(t *testing.T) {
 		t.Fatalf("New certificate expiration is too old")
 	}
 }
+*/
 
 // genExpiredCertPair generates an expired key/cert pair to test that expired
 // certificates are being regenerated correctly.

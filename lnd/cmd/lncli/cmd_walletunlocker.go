@@ -4,17 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/hex"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
-	"github.com/pkt-cash/pktd/lnd/lncfg"
 	"github.com/pkt-cash/pktd/lnd/lnrpc"
-	"github.com/pkt-cash/pktd/lnd/walletunlocker"
+	"github.com/pkt-cash/pktd/pktwallet/wallet/seedwords"
 	"github.com/urfave/cli"
 )
 
@@ -209,7 +206,7 @@ func create(ctx *cli.Context) er.R {
 	}
 
 	walletPassword, err := capturePassword(
-		"Input wallet password: ", false, walletunlocker.ValidatePassword,
+		"Input wallet password: ", false, nil,
 	)
 	if err != nil {
 		return err
@@ -224,8 +221,8 @@ func create(ctx *cli.Context) er.R {
 mnemonicCheck:
 	for {
 		fmt.Println()
-		fmt.Printf("Do you have an existing cipher seed " +
-			"mnemonic you want to use? (Enter y/n): ")
+		fmt.Printf("Do you have an existing Pktwallet seed " +
+			"you want to use? (Enter y/n): ")
 
 		reader := bufio.NewReader(os.Stdin)
 		answer, errr := reader.ReadString('\n')
@@ -256,9 +253,7 @@ mnemonicCheck:
 		recoveryWindow     int32
 	)
 	if hasMnemonic {
-		// We'll now prompt the user to enter in their 24-word
-		// mnemonic.
-		fmt.Printf("Input your 24-word mnemonic separated by spaces: ")
+		fmt.Printf("Input your 15-word Pktwallet seed separated by spaces: ")
 		reader := bufio.NewReader(os.Stdin)
 		mnemonic, errr := reader.ReadString('\n')
 		if errr != nil {
@@ -274,53 +269,53 @@ mnemonicCheck:
 
 		fmt.Println()
 
-		if len(cipherSeedMnemonic) != 24 {
+		if len(cipherSeedMnemonic) != 15 {
 			return er.Errorf("wrong cipher seed mnemonic "+
 				"length: got %v words, expecting %v words",
-				len(cipherSeedMnemonic), 24)
+				len(cipherSeedMnemonic), 15)
 		}
 
-		// Additionally, the user may have a passphrase, that will also
-		// need to be provided so the daemon can properly decipher the
-		// cipher seed.
-		aezeedPass, err = readPassword("Input your cipher seed " +
-			"passphrase (press enter if your seed doesn't have a " +
-			"passphrase): ")
+		seedEnc, err := seedwords.SeedFromWords(mnemonic)
 		if err != nil {
 			return err
 		}
-
-		for {
-			fmt.Println()
-			fmt.Printf("Input an optional address look-ahead "+
-				"used to scan for used keys (default %d): ",
-				defaultRecoveryWindow)
-
-			reader := bufio.NewReader(os.Stdin)
-			answer, errr := reader.ReadString('\n')
-			if errr != nil {
-				return er.E(errr)
-			}
-
-			fmt.Println()
-
-			answer = strings.TrimSpace(answer)
-
-			if len(answer) == 0 {
-				recoveryWindow = defaultRecoveryWindow
-				break
-			}
-
-			lookAhead, err := strconv.Atoi(answer)
-			if err != nil {
-				fmt.Printf("Unable to parse recovery "+
-					"window: %v\n", err)
-				continue
-			}
-
-			recoveryWindow = int32(lookAhead)
-			break
+		if seedEnc.NeedsPassphrase() {
+			aezeedPass, err = readPassword("This seed is encrypted " +
+				"with a passphrase please enter it now: ")
 		}
+
+		/// This should be automatic
+		// for {
+		// 	fmt.Println()
+		// 	fmt.Printf("Input an optional address look-ahead "+
+		// 		"used to scan for used keys (default %d): ",
+		// 		defaultRecoveryWindow)
+
+		// 	reader := bufio.NewReader(os.Stdin)
+		// 	answer, errr := reader.ReadString('\n')
+		// 	if errr != nil {
+		// 		return er.E(errr)
+		// 	}
+
+		// 	fmt.Println()
+
+		// 	answer = strings.TrimSpace(answer)
+
+		// 	if len(answer) == 0 {
+		// 		recoveryWindow = defaultRecoveryWindow
+		// 		break
+		// 	}
+
+		// 	lookAhead, err := strconv.Atoi(answer)
+		// 	if err != nil {
+		// 		fmt.Printf("Unable to parse recovery "+
+		// 			"window: %v\n", err)
+		// 		continue
+		// 	}
+
+		// 	recoveryWindow = int32(lookAhead)
+		// 	break
+		// }
 	} else {
 		// Otherwise, if the user doesn't have a mnemonic that they
 		// want to use, we'll generate a fresh one with the GenSeed
@@ -342,59 +337,47 @@ mnemonicCheck:
 		fmt.Println()
 
 		genSeedReq := &lnrpc.GenSeedRequest{
-			AezeedPassphrase: aezeedPass,
+			SeedPassphraseBin: aezeedPass,
 		}
 		seedResp, err := client.GenSeed(ctxb, genSeedReq)
 		if err != nil {
 			return er.Errorf("unable to generate seed: %v", err)
 		}
 
-		cipherSeedMnemonic = seedResp.CipherSeedMnemonic
+		cipherSeedMnemonic = seedResp.Seed
 	}
 
 	// Before we initialize the wallet, we'll display the cipher seed to
 	// the user so they can write it down.
-	mnemonicWords := cipherSeedMnemonic
 
-	fmt.Println("!!!YOU MUST WRITE DOWN THIS SEED TO BE ABLE TO " +
+	fmt.Println("!!!YOU MUST WRITE DOWN THIS SEED AND YOUR PASSWORD TO BE ABLE TO " +
 		"RESTORE THE WALLET!!!")
 	fmt.Println()
 
 	fmt.Println("---------------BEGIN LND CIPHER SEED---------------")
 
-	numCols := 4
-	colWords := monowidthColumns(mnemonicWords, numCols)
-	for i := 0; i < len(colWords); i += numCols {
-		fmt.Printf("%2d. %3s  %2d. %3s  %2d. %3s  %2d. %3s\n",
-			i+1, colWords[i], i+2, colWords[i+1], i+3,
-			colWords[i+2], i+4, colWords[i+3])
-	}
+	fmt.Printf("%v\n", strings.Join(cipherSeedMnemonic, " "))
 
 	fmt.Println("---------------END LND CIPHER SEED-----------------")
 
-	fmt.Println("\n!!!YOU MUST WRITE DOWN THIS SEED TO BE ABLE TO " +
+	fmt.Println("\n!!!YOU MUST WRITE DOWN THIS SEED AND YOUR PASSWORD TO BE ABLE TO " +
 		"RESTORE THE WALLET!!!")
 
 	// With either the user's prior cipher seed, or a newly generated one,
 	// we'll go ahead and initialize the wallet.
 	req := &lnrpc.InitWalletRequest{
-		WalletPassword:     walletPassword,
-		CipherSeedMnemonic: cipherSeedMnemonic,
-		AezeedPassphrase:   aezeedPass,
-		RecoveryWindow:     recoveryWindow,
-		ChannelBackups:     chanBackups,
-		StatelessInit:      statelessInit,
+		WalletPassphraseBin: walletPassword,
+		WalletSeed:          cipherSeedMnemonic,
+		SeedPassphraseBin:   aezeedPass,
+		RecoveryWindow:      recoveryWindow,
+		ChannelBackups:      chanBackups,
 	}
-	response, errr := client.InitWallet(ctxb, req)
+	_, errr := client.InitWallet(ctxb, req)
 	if errr != nil {
 		return er.E(errr)
 	}
 
-	fmt.Println("\nlnd successfully initialized!")
-
-	if statelessInit {
-		return storeOrPrintAdminMac(ctx, response.AdminMacaroon)
-	}
+	fmt.Println("\npld successfully initialized!")
 
 	return nil
 }
@@ -421,10 +404,12 @@ func capturePassword(instruction string, optional bool,
 
 		// If the password provided is not valid, restart
 		// password capture process from the beginning.
-		if err := validate(password); err != nil {
-			fmt.Println(err.String())
-			fmt.Println()
-			continue
+		if validate != nil {
+			if err := validate(password); err != nil {
+				fmt.Println(err.String())
+				fmt.Println()
+				continue
+			}
 		}
 
 		passwordConfirmed, err := readPassword("Confirm password: ")
@@ -487,7 +472,8 @@ func unlock(ctx *cli.Context) er.R {
 	defer cleanUp()
 
 	var (
-		pw   []byte
+		pw []byte
+		//		ppw  []byte
 		errr error
 		err  er.R
 	)
@@ -507,7 +493,8 @@ func unlock(ctx *cli.Context) er.R {
 	// terminal to be a real tty and will fail if a string is piped into
 	// lncli.
 	default:
-		pw, err = readPassword("Input wallet password: ")
+		pw, err = readPassword("Input wallet private password: ")
+		//		ppw, _ = readPassword("Input wallet public password: ")
 	}
 	if err != nil {
 		return err
@@ -534,9 +521,8 @@ func unlock(ctx *cli.Context) er.R {
 	}
 
 	req := &lnrpc.UnlockWalletRequest{
-		WalletPassword: pw,
-		RecoveryWindow: recoveryWindow,
-		StatelessInit:  ctx.Bool(statelessInitFlag.Name),
+		WalletPassphraseBin: pw,
+		RecoveryWindow:      recoveryWindow,
 	}
 	_, errr = client.UnlockWallet(ctxb, req)
 	if errr != nil {
@@ -597,28 +583,54 @@ var changePasswordCommand = cli.Command{
 
 func changePassword(ctx *cli.Context) er.R {
 	ctxb := context.Background()
-	client, cleanUp := getWalletUnlockerClient(ctx)
+	client, cleanUp := getMetaServiceClient(ctx)
 	defer cleanUp()
 
-	currentPw, err := readPassword("Input current wallet password: ")
+	currentPw, err := readPassword("Input current wallet private password: ")
 	if err != nil {
 		return err
 	}
 
-	newPw, err := readPassword("Input new wallet password: ")
+	newPw, err := readPassword("Input new wallet private password: ")
 	if err != nil {
 		return err
 	}
 
-	confirmPw, err := readPassword("Confirm new wallet password: ")
+	confirmPw, err := readPassword("Confirm new wallet private password: ")
 	if err != nil {
 		return err
 	}
 
 	if !bytes.Equal(newPw, confirmPw) {
-		return er.Errorf("passwords don't match")
+		return er.Errorf("private passwords don't match")
 	}
 
+	/*
+		currentPubPw, err := readPassword("Input current wallet public password: ")
+		if err != nil {
+			return err
+		}
+
+		newPubPw, err := readPassword("Input new wallet public password: ")
+		if err != nil {
+			return err
+		}
+
+		confirmPubPw, err := readPassword("Confirm new wallet public password: ")
+		if err != nil {
+			return err
+		}
+
+		if !bytes.Equal(newPubPw, confirmPubPw) {
+			return er.Errorf("public passwords don't match")
+		}
+		if currentPubPw == nil {
+			currentPubPw = []byte("public")
+		}
+		if newPubPw == nil {
+			newPubPw = []byte("public")
+		}
+	*/
 	// Should the daemon be initialized stateless? Then we expect an answer
 	// with the admin macaroon later. Because the --save_to is related to
 	// stateless init, it doesn't make sense to be set on its own.
@@ -629,43 +641,14 @@ func changePassword(ctx *cli.Context) er.R {
 	}
 
 	req := &lnrpc.ChangePasswordRequest{
-		CurrentPassword:    currentPw,
-		NewPassword:        newPw,
-		StatelessInit:      statelessInit,
-		NewMacaroonRootKey: ctx.Bool("new_mac_root_key"),
+		CurrentPasswordBin: currentPw,
+		NewPassphraseBin:   newPw,
 	}
 
-	response, errr := client.ChangePassword(ctxb, req)
+	_, errr := client.ChangePassword(ctxb, req)
 	if errr != nil {
 		return er.E(errr)
 	}
 
-	if statelessInit {
-		return storeOrPrintAdminMac(ctx, response.AdminMacaroon)
-	}
-
-	return nil
-}
-
-// storeOrPrintAdminMac either stores the admin macaroon to a file specified or
-// prints it to standard out, depending on the user flags set.
-func storeOrPrintAdminMac(ctx *cli.Context, adminMac []byte) er.R {
-	// The user specified the optional --save_to parameter. We'll save the
-	// macaroon to that file.
-	if ctx.IsSet("save_to") {
-		macSavePath := lncfg.CleanAndExpandPath(ctx.String("save_to"))
-		err := ioutil.WriteFile(macSavePath, adminMac, 0644)
-		if err != nil {
-			_ = os.Remove(macSavePath)
-			return er.E(err)
-		}
-		fmt.Printf("Admin macaroon saved to %s\n", macSavePath)
-		return nil
-	}
-
-	// Otherwise we just print it. The user MUST store this macaroon
-	// somewhere so we either save it to a provided file path or just print
-	// it to standard output.
-	fmt.Printf("Admin macaroon: %s\n", hex.EncodeToString(adminMac))
 	return nil
 }

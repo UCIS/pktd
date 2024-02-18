@@ -1,7 +1,6 @@
 package lnrpc
 
 import (
-	"encoding/hex"
 	"sort"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
@@ -9,7 +8,7 @@ import (
 )
 
 // RPCTransactionDetails returns a set of rpc transaction details.
-func RPCTransactionDetails(txns []*lnwallet.TransactionDetail) *TransactionDetails {
+func RPCTransactionDetails(txns []*lnwallet.TransactionDetail, reversed bool) *TransactionDetails {
 	txDetails := &TransactionDetails{
 		Transactions: make([]*Transaction, len(txns)),
 	}
@@ -36,7 +35,7 @@ func RPCTransactionDetails(txns []*lnwallet.TransactionDetail) *TransactionDetai
 			TimeStamp:        tx.Timestamp,
 			TotalFees:        tx.TotalFees,
 			DestAddresses:    destAddresses,
-			RawTxHex:         hex.EncodeToString(tx.RawTx),
+			RawTxHex:         tx.RawTx,
 			Label:            tx.Label,
 		}
 	}
@@ -47,7 +46,11 @@ func RPCTransactionDetails(txns []*lnwallet.TransactionDetail) *TransactionDetai
 	// by height, unconfirmed transactions will follow our oldest
 	// transactions, because they have lower block heights.
 	sort.Slice(txDetails.Transactions, func(i, j int) bool {
-		return txDetails.Transactions[i].NumConfirmations <
+		if !reversed {
+			return txDetails.Transactions[i].NumConfirmations <
+				txDetails.Transactions[j].NumConfirmations
+		}
+		return txDetails.Transactions[i].NumConfirmations >
 			txDetails.Transactions[j].NumConfirmations
 	})
 

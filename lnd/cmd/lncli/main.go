@@ -5,7 +5,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,13 +15,11 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/lnd/lncfg"
 	"github.com/pkt-cash/pktd/lnd/lnrpc"
-	"github.com/pkt-cash/pktd/lnd/macaroons"
 	"github.com/pkt-cash/pktd/pktconfig/version"
 	"github.com/urfave/cli"
 
 	"golang.org/x/crypto/ssh/terminal"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 )
 
 const (
@@ -36,6 +33,7 @@ const (
 
 var (
 	defaultLndDir      = btcutil.AppDataDir("lnd", false)
+	defaultPktDir      = btcutil.AppDataDir("pktwallet", false)
 	defaultTLSCertPath = filepath.Join(defaultLndDir, defaultTLSCertFilename)
 
 	// maxMsgRecvSize is the largest message our client will receive. We
@@ -44,7 +42,7 @@ var (
 )
 
 func fatal(err er.R) {
-	fmt.Fprintf(os.Stderr, "[lncli] %v\n", err)
+	fmt.Fprintf(os.Stderr, "[pldctl] %v\n", err)
 	os.Exit(1)
 }
 
@@ -58,6 +56,16 @@ func getWalletUnlockerClient(ctx *cli.Context) (lnrpc.WalletUnlockerClient, func
 	return lnrpc.NewWalletUnlockerClient(conn), cleanUp
 }
 
+func getMetaServiceClient(ctx *cli.Context) (lnrpc.MetaServiceClient, func()) {
+	conn := getClientConn(ctx, true)
+
+	cleanUp := func() {
+		conn.Close()
+	}
+
+	return lnrpc.NewMetaServiceClient(conn), cleanUp
+}
+
 func getClient(ctx *cli.Context) (lnrpc.LightningClient, func()) {
 	conn := getClientConn(ctx, false)
 
@@ -69,6 +77,11 @@ func getClient(ctx *cli.Context) (lnrpc.LightningClient, func()) {
 }
 
 func getClientConn(ctx *cli.Context, skipMacaroons bool) *grpc.ClientConn {
+
+	//	we want to disable the use of macaroons so, force that it's turned off
+	_ = skipMacaroons
+	skipMacaroons = true
+
 	// First, we'll get the selected stored profile or an ephemeral one
 	// created from the global options in the CLI context.
 	profile, err := getGlobalOptions(ctx, skipMacaroons)
@@ -76,94 +89,8 @@ func getClientConn(ctx *cli.Context, skipMacaroons bool) *grpc.ClientConn {
 		fatal(er.Errorf("could not load global options: %v", err))
 	}
 
-	// Load the specified TLS certificate.
-	certPool, err := profile.cert()
-	if err != nil {
-		fatal(er.Errorf("could not create cert pool: %v", err))
-	}
-
 	var opts []grpc.DialOption
-	if ctx.GlobalBool("notls") {
-		opts = append(opts, grpc.WithInsecure())
-	} else {
-		// Build transport credentials from the certificate pool. If there is no
-		// certificate pool, we expect the server to use a non-self-signed
-		// certificate such as a certificate obtained from Let's Encrypt.
-		var creds credentials.TransportCredentials
-		if certPool != nil {
-			creds = credentials.NewClientTLSFromCert(certPool, "")
-		} else {
-			// Fallback to the system pool. Using an empty tls config is an
-			// alternative to x509.SystemCertPool(). That call is not
-			// supported on Windows.
-			creds = credentials.NewTLS(&tls.Config{})
-		}
-
-		// Create a dial options array.
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-	}
-
-	// Only process macaroon credentials if --no-macaroons isn't set and
-	// if we're not skipping macaroon processing.
-	if !profile.NoMacaroons && !skipMacaroons {
-		// Find out which macaroon to load.
-		macName := profile.Macaroons.Default
-		if ctx.GlobalIsSet("macfromjar") {
-			macName = ctx.GlobalString("macfromjar")
-		}
-		var macEntry *macaroonEntry
-		for _, entry := range profile.Macaroons.Jar {
-			if entry.Name == macName {
-				macEntry = entry
-				break
-			}
-		}
-		if macEntry == nil {
-			fatal(er.Errorf("macaroon with name '%s' not found "+
-				"in profile", macName))
-		}
-
-		// Get and possibly decrypt the specified macaroon.
-		//
-		// TODO(guggero): Make it possible to cache the password so we
-		// don't need to ask for it every time.
-		mac, err := macEntry.loadMacaroon(readPassword)
-		if err != nil {
-			fatal(er.Errorf("could not load macaroon: %v", err))
-		}
-
-		macConstraints := []macaroons.Constraint{
-			// We add a time-based constraint to prevent replay of the
-			// macaroon. It's good for 60 seconds by default to make up for
-			// any discrepancy between client and server clocks, but leaking
-			// the macaroon before it becomes invalid makes it possible for
-			// an attacker to reuse the macaroon. In addition, the validity
-			// time of the macaroon is extended by the time the server clock
-			// is behind the client clock, or shortened by the time the
-			// server clock is ahead of the client clock (or invalid
-			// altogether if, in the latter case, this time is more than 60
-			// seconds).
-			// TODO(aakselrod): add better anti-replay protection.
-			macaroons.TimeoutConstraint(profile.Macaroons.Timeout),
-
-			// Lock macaroon down to a specific IP address.
-			macaroons.IPLockConstraint(profile.Macaroons.IP),
-
-			// ... Add more constraints if needed.
-		}
-
-		// Apply constraints to the macaroon.
-		constrainedMac, err := macaroons.AddConstraints(
-			mac, macConstraints...,
-		)
-		if err != nil {
-			fatal(err)
-		}
-
-		// Now we append the macaroon credentials to the dial options.
-		cred := macaroons.NewMacaroonCredential(constrainedMac)
-		opts = append(opts, grpc.WithPerRPCCredentials(cred))
-	}
+	opts = append(opts, grpc.WithInsecure())
 
 	// We need to use a custom dialer so we can also connect to unix sockets
 	// and not just TCP addresses.
@@ -181,7 +108,7 @@ func getClientConn(ctx *cli.Context, skipMacaroons bool) *grpc.ClientConn {
 
 // extractPathArgs parses the TLS certificate and macaroon paths from the
 // command.
-func extractPathArgs(ctx *cli.Context) (string, string, er.R) {
+func extractPathArgs(ctx *cli.Context) (string, string, string, er.R) {
 	// We'll start off by parsing the active chain and network. These are
 	// needed to determine the correct path to the macaroon when not
 	// specified.
@@ -189,14 +116,14 @@ func extractPathArgs(ctx *cli.Context) (string, string, er.R) {
 	switch chain {
 	case "bitcoin", "litecoin", "pkt":
 	default:
-		return "", "", er.Errorf("unknown chain: %v", chain)
+		return "", "", "", er.Errorf("unknown chain: %v", chain)
 	}
 
 	network := strings.ToLower(ctx.GlobalString("network"))
 	switch network {
 	case "mainnet", "testnet", "regtest", "simnet":
 	default:
-		return "", "", er.Errorf("unknown network: %v", network)
+		return "", "", "", er.Errorf("unknown network: %v", network)
 	}
 
 	// We'll now fetch the lnddir so we can make a decision  on how to
@@ -204,6 +131,8 @@ func extractPathArgs(ctx *cli.Context) (string, string, er.R) {
 	// either be the default, or will have been overwritten by the end
 	// user.
 	lndDir := lncfg.CleanAndExpandPath(ctx.GlobalString("lnddir"))
+
+	pktDir := lncfg.CleanAndExpandPath(ctx.GlobalString("pktdir"))
 
 	// If the macaroon path as been manually provided, then we'll only
 	// target the specified file.
@@ -231,14 +160,18 @@ func extractPathArgs(ctx *cli.Context) (string, string, er.R) {
 		tlsCertPath = filepath.Join(lndDir, defaultTLSCertFilename)
 	}
 
-	return tlsCertPath, macPath, nil
+	if pktDir == "" {
+		pktDir = defaultPktDir
+	}
+
+	return tlsCertPath, macPath, pktDir, nil
 }
 
 func main() {
 	app := cli.NewApp()
-	app.Name = "lncli"
+	app.Name = "pldctl"
 	app.Version = version.Version()
-	app.Usage = "control plane for your Lightning Network Daemon (lnd)"
+	app.Usage = "control plane for your Lightning Network Daemon (pld)"
 	app.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "rpcserver",
@@ -249,6 +182,11 @@ func main() {
 			Name:  "lnddir",
 			Value: defaultLndDir,
 			Usage: "The path to lnd's base directory.",
+		},
+		cli.StringFlag{
+			Name:  "pktdir",
+			Value: defaultPktDir,
+			Usage: "The path to pktwallet's base directory.",
 		},
 		cli.BoolFlag{
 			Name:  "notls",
@@ -270,23 +208,6 @@ func main() {
 				"testnet, etc.",
 			Value: "mainnet",
 		},
-		cli.BoolFlag{
-			Name:  "no-macaroons",
-			Usage: "Disable macaroon authentication.",
-		},
-		cli.StringFlag{
-			Name:  "macaroonpath",
-			Usage: "The path to macaroon file.",
-		},
-		cli.Int64Flag{
-			Name:  "macaroontimeout",
-			Value: 60,
-			Usage: "Anti-replay macaroon validity time in seconds.",
-		},
-		cli.StringFlag{
-			Name:  "macaroonip",
-			Usage: "If set, lock macaroon to specific IP address.",
-		},
 		cli.StringFlag{
 			Name: "profile, p",
 			Usage: "Instead of reading settings from command " +
@@ -295,12 +216,6 @@ func main() {
 				"a default profile is set, this flag can be " +
 				"set to an empty string to disable reading " +
 				"values from the profiles file.",
-		},
-		cli.StringFlag{
-			Name: "macfromjar",
-			Usage: "Use this macaroon from the profile's " +
-				"macaroon jar instead of the default one. " +
-				"Can only be used if profiles are defined.",
 		},
 	}
 	app.Commands = []cli.Command{
@@ -345,21 +260,30 @@ func main() {
 		listChainTxnsCommand,
 		stopCommand,
 		signMessageCommand,
-		verifyMessageCommand,
 		feeReportCommand,
 		updateChannelPolicyCommand,
 		forwardingHistoryCommand,
 		exportChanBackupCommand,
 		verifyChanBackupCommand,
 		restoreChanBackupCommand,
-		bakeMacaroonCommand,
-		listMacaroonIDsCommand,
-		deleteMacaroonIDCommand,
-		listPermissionsCommand,
-		printMacaroonCommand,
 		trackPaymentCommand,
 		versionCommand,
 		profileSubCommand,
+		resyncCommand,
+		stopresyncCommand,
+		getwalletseedCommand,
+		getsecretCommand,
+		importprivkeyCommand,
+		listlockunspentCommand,
+		lockunspentCommand,
+		createtransactionCommand,
+		dumpprivkeyCommand,
+		getnewaddressCommand,
+		gettransactionCommand,
+		setNetworkStewardVoteCommand,
+		getNetworkStewardVoteCommand,
+		bcastTransactionCommand,
+		sendFromCommand,
 	}
 
 	// Add any extra commands determined by build flags.

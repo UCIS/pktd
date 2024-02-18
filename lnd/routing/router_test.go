@@ -14,6 +14,7 @@ import (
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
+	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/wire"
 
 	"github.com/pkt-cash/pktd/lnd/channeldb"
@@ -195,6 +196,8 @@ func createTestCtxFromFile(startingHeight uint32, testGraph string) (*testCtx, f
 func TestFindRoutesWithFeeLimit(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestFindRoutesWithFeeLimit()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(
 		startingBlockHeight, basicGraphFilePath,
@@ -251,6 +254,8 @@ func TestFindRoutesWithFeeLimit(t *testing.T) {
 // succeeds, or all routes have been exhausted.
 func TestSendPaymentRouteFailureFallback(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestSendPaymentRouteFailureFallback()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight, basicGraphFilePath)
@@ -327,6 +332,8 @@ func TestSendPaymentRouteFailureFallback(t *testing.T) {
 // valid signature.
 func TestChannelUpdateValidation(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestChannelUpdateValidation()")
 
 	// Setup a three node network.
 	chanCapSat := btcutil.Amount(100000)
@@ -487,6 +494,8 @@ func TestChannelUpdateValidation(t *testing.T) {
 func TestSendPaymentErrorRepeatedFeeInsufficient(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestSendPaymentErrorRepeatedFeeInsufficient()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight, basicGraphFilePath)
 	if err != nil {
@@ -587,6 +596,8 @@ func TestSendPaymentErrorRepeatedFeeInsufficient(t *testing.T) {
 // current block height.
 func TestSendPaymentErrorNonFinalTimeLockErrors(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestSendPaymentErrorNonFinalTimeLockErrors()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight, basicGraphFilePath)
@@ -720,6 +731,8 @@ func TestSendPaymentErrorNonFinalTimeLockErrors(t *testing.T) {
 // underlying SendToSwitch function.
 func TestSendPaymentErrorPathPruning(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestSendPaymentErrorPathPruning()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight, basicGraphFilePath)
@@ -907,6 +920,8 @@ func TestSendPaymentErrorPathPruning(t *testing.T) {
 func TestAddProof(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestAddProof()")
+
 	ctx, cleanup, err := createTestCtxSingleNode(0)
 	if err != nil {
 		t.Fatal(err)
@@ -972,6 +987,8 @@ func TestAddProof(t *testing.T) {
 func TestIgnoreNodeAnnouncement(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestIgnoreNodeAnnouncement()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight,
 		basicGraphFilePath)
@@ -1002,6 +1019,8 @@ func TestIgnoreNodeAnnouncement(t *testing.T) {
 // ignore a channel policy for a channel not in the graph.
 func TestIgnoreChannelEdgePolicyForUnknownChannel(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestIgnoreChannelEdgePolicyForUnknownChannel()")
 
 	const startingBlockHeight = 101
 
@@ -1086,6 +1105,8 @@ func TestIgnoreChannelEdgePolicyForUnknownChannel(t *testing.T) {
 // announcements for the channel vertexes to be able to use the channel.
 func TestAddEdgeUnknownVertexes(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestAddEdgeUnknownVertexes()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(
@@ -1358,6 +1379,8 @@ func TestAddEdgeUnknownVertexes(t *testing.T) {
 func TestWakeUpOnStaleBranch(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestWakeUpOnStaleBranch()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxSingleNode(startingBlockHeight)
 	if err != nil {
@@ -1570,6 +1593,8 @@ func TestWakeUpOnStaleBranch(t *testing.T) {
 func TestDisconnectedBlocks(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestDisconnectedBlocks()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxSingleNode(startingBlockHeight)
 	if err != nil {
@@ -1771,6 +1796,8 @@ func TestDisconnectedBlocks(t *testing.T) {
 func TestRouterChansClosedOfflinePruneGraph(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestRouterChansClosedOfflinePruneGraph()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxSingleNode(startingBlockHeight)
 	if err != nil {
@@ -1928,6 +1955,8 @@ func TestRouterChansClosedOfflinePruneGraph(t *testing.T) {
 func TestPruneChannelGraphStaleEdges(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestPruneChannelGraphStaleEdges()")
+
 	freshTimestamp := time.Now()
 	staleTimestamp := time.Unix(0, 0)
 
@@ -2030,6 +2059,8 @@ func TestPruneChannelGraphStaleEdges(t *testing.T) {
 // with both edges disabled from our channel graph.
 func TestPruneChannelGraphDoubleDisabled(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestPruneChannelGraphDoubleDisabled()")
 
 	// We'll create the following test graph so that only the last channel
 	// is pruned. We'll use a fresh timestamp to ensure they're not pruned
@@ -2159,6 +2190,8 @@ func TestPruneChannelGraphDoubleDisabled(t *testing.T) {
 func TestFindPathFeeWeighting(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestFindPathFeeWeighting()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight, basicGraphFilePath)
 	if err != nil {
@@ -2205,6 +2238,8 @@ func TestFindPathFeeWeighting(t *testing.T) {
 // node announcements.
 func TestIsStaleNode(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestIsStaleNode()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxSingleNode(startingBlockHeight)
@@ -2288,6 +2323,8 @@ func TestIsStaleNode(t *testing.T) {
 func TestIsKnownEdge(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestIsKnownEdge()")
+
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxSingleNode(startingBlockHeight)
 	if err != nil {
@@ -2339,6 +2376,8 @@ func TestIsKnownEdge(t *testing.T) {
 // stale channel edge update announcements.
 func TestIsStaleEdgePolicy(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestIsStaleEdgePolicy()")
 
 	const startingBlockHeight = 101
 	ctx, cleanUp, err := createTestCtxFromFile(startingBlockHeight,
@@ -2446,6 +2485,8 @@ func TestIsStaleEdgePolicy(t *testing.T) {
 func TestEmptyRoutesGenerateSphinxPacket(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestEmptyRoutesGenerateSphinxPacket()")
+
 	sessionKey, _ := btcec.NewPrivateKey(btcec.S256())
 	emptyRoute := &route.Route{}
 	_, _, err := generateSphinxPacket(emptyRoute, testHash[:], sessionKey)
@@ -2458,6 +2499,8 @@ func TestEmptyRoutesGenerateSphinxPacket(t *testing.T) {
 // edges along the route will be pruned.
 func TestUnknownErrorSource(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestUnknownErrorSource()")
 
 	// Setup a network. It contains two paths to c: a->b->c and an
 	// alternative a->d->c.
@@ -2612,6 +2655,8 @@ func assertChannelsPruned(t *testing.T, graph *channeldb.ChannelGraph,
 func TestSendToRouteStructuredError(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestSendToRouteStructuredError()")
+
 	// Setup a three node network.
 	chanCapSat := btcutil.Amount(100000)
 	testChannels := []*testChannel{
@@ -2721,6 +2766,8 @@ func TestSendToRouteStructuredError(t *testing.T) {
 // using SendToRoute.
 func TestSendToRouteMultiShardSend(t *testing.T) {
 	t.Parallel()
+
+	log.Debugf(">>> Running test TestSendToRouteMultiShardSend()")
 
 	ctx, cleanup, err := createTestCtxSingleNode(0)
 	if err != nil {
@@ -2854,6 +2901,8 @@ func TestSendToRouteMultiShardSend(t *testing.T) {
 func TestSendToRouteMaxHops(t *testing.T) {
 	t.Parallel()
 
+	log.Debugf(">>> Running test TestSendToRouteMaxHops()")
+
 	// Setup a two node network.
 	chanCapSat := btcutil.Amount(100000)
 	testChannels := []*testChannel{
@@ -2919,6 +2968,9 @@ func TestSendToRouteMaxHops(t *testing.T) {
 
 // TestBuildRoute tests whether correct routes are built.
 func TestBuildRoute(t *testing.T) {
+
+	log.Debugf(">>> Running test TestBuildRoute()")
+
 	// Setup a three node network.
 	chanCapSat := btcutil.Amount(100000)
 	testChannels := []*testChannel{

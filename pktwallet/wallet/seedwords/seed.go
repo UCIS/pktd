@@ -47,9 +47,10 @@ var allWords = make(map[string]*wordsDesc)
  * U: unused
  * Ver: 0
  * E: 1 if there is a passphrase encrypting the seed, 0 otherwise
- * Checksum: first byte of blake2b of structure with Checksum and Unused cleared
+ * Checksum: first byte of 32-byte blake2b digest without key of structure with Checksum and Unused cleared
  * Birthday (encrypted): when the wallet was created, unix time divided by 60*60*24, big endian
- * Seed (encrypted): 32 byte seed content
+ * Seed (encrypted): 17 byte random seed content
+ * Note that both the birthday and random seed content, totalling 19 bytes, are used as seed data for BIP0032 key derivation
  */
 const seedVersion = 0
 const wordCount = 15
@@ -209,6 +210,11 @@ func (s *Seed) Zero() {
 // how far back in time you must search for possible payments to the wallet.
 func (s *Seed) Birthday() time.Time {
 	return s.seedBin.getBday()
+}
+
+// Provide the seed version number
+func (s *Seed) Version() byte {
+	return s.seedBin.getVer()
 }
 
 // Bytes returns the secret seed, 19 bytes long including the birthday bytes

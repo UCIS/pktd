@@ -11,6 +11,7 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/lnd/input"
 	"github.com/pkt-cash/pktd/lnd/lnwallet/chainfee"
+	"github.com/pkt-cash/pktd/pktwallet/wallet"
 	"github.com/pkt-cash/pktd/pktwallet/wallet/txauthor"
 	"github.com/pkt-cash/pktd/pktwallet/wtxmgr"
 	"github.com/pkt-cash/pktd/wire"
@@ -195,13 +196,9 @@ type WalletController interface {
 	// the target fee expressed in sat/kw that should be used when crafting
 	// the transaction.
 	//
-	// NOTE: The dryRun argument can be set true to create a tx that
-	// doesn't alter the database. A tx created with this set to true
-	// SHOULD NOT be broadcasted.
-	//
 	// NOTE: This method requires the global coin selection lock to be held.
 	CreateSimpleTx(outputs []*wire.TxOut, feeRate chainfee.SatPerKWeight,
-		dryRun bool) (*txauthor.AuthoredTx, er.R)
+		sendMode wallet.SendMode) (*txauthor.AuthoredTx, er.R)
 
 	// ListUnspentWitness returns all unspent outputs which are version 0
 	// witness programs. The 'minconfirms' and 'maxconfirms' parameters
@@ -215,14 +212,13 @@ type WalletController interface {
 	ListUnspentWitness(minconfirms, maxconfirms int32) ([]*Utxo, er.R)
 
 	// ListTransactionDetails returns a list of all transactions which are
-	// relevant to the wallet over [startHeight;endHeight]. If start height
-	// is greater than end height, the transactions will be retrieved in
-	// reverse order. To include unconfirmed transactions, endHeight should
+	// relevant to the wallet over [startHeight;endHeight].
+	// To include unconfirmed transactions, endHeight should
 	// be set to the special value -1. This will return transactions from
 	// the tip of the chain until the start height (inclusive) and
 	// unconfirmed transactions.
 	ListTransactionDetails(startHeight,
-		endHeight int32) ([]*TransactionDetail, er.R)
+		endHeight, skip, limit, coinbase int32, reversed bool) ([]*TransactionDetail, er.R)
 
 	// LockOutpoint marks an outpoint as locked meaning it will no longer
 	// be deemed as eligible for coin selection. Locking outputs are

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
+	"github.com/pkt-cash/pktd/connmgr/banmgr"
 	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/wire/protocol"
 
@@ -21,10 +22,8 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/connmgr"
-	"github.com/pkt-cash/pktd/neutrino/banman"
 	"github.com/pkt-cash/pktd/neutrino/blockntfns"
 	"github.com/pkt-cash/pktd/neutrino/cache/lru"
-	"github.com/pkt-cash/pktd/neutrino/filterdb"
 	"github.com/pkt-cash/pktd/neutrino/headerfs"
 	"github.com/pkt-cash/pktd/neutrino/pushtx"
 	"github.com/pkt-cash/pktd/peer"
@@ -59,9 +58,9 @@ var (
 	RequiredServices = protocol.SFNodeNetwork | protocol.SFNodeWitness | protocol.SFNodeCF
 
 	// BanThreshold is the maximum ban score before a peer is banned.
-	BanThreshold = uint32(100)
+	BanThreshold     = uint32(100)
 	BanWarnThreshold = uint32(0)
-	
+
 	// BanDuration is the duration of a ban.
 	BanDuration = time.Hour * 24
 
@@ -155,7 +154,7 @@ type ServerPeer struct {
 	server         *ChainService
 	persistent     bool
 	knownAddresses map[string]struct{}
-	banScore       connmgr.DynamicBanScore
+	banMgr         *banmgr.BanMgr
 	quit           chan struct{}
 
 	// The following map of subcribers is used to subscribe to messages
@@ -177,13 +176,14 @@ func newServerPeer(s *ChainService, isPersistent bool) *ServerPeer {
 		knownAddresses:  make(map[string]struct{}),
 		quit:            make(chan struct{}),
 		recvSubscribers: make(map[spMsgSubscription]struct{}),
+		banMgr:          &s.banMgr,
 	}
 }
 
 // newestBlock returns the current best block hash and height using the format
 // required by the configuration for the peer package.
 func (sp *ServerPeer) newestBlock() (*chainhash.Hash, int32, er.R) {
-	bestHeader, bestHeight, err := sp.server.BlockHeaders.ChainTip()
+	bestHeader, bestHeight, err := sp.server.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -240,13 +240,6 @@ func (sp *ServerPeer) OnVersion(_ *peer.Peer, msg *wire.MsgVersion) *wire.MsgRej
 	peerServices := sp.Services()
 	if peerServices&protocol.SFNodeWitness != protocol.SFNodeWitness ||
 		peerServices&protocol.SFNodeCF != protocol.SFNodeCF {
-
-		peerAddr := sp.Addr()
-		err := sp.server.BanPeer(peerAddr, banman.NoCompactFilters)
-		if err != nil {
-			log.Errorf("Unable to ban peer %v: %v", peerAddr, err)
-		}
-
 		sp.Disconnect()
 
 		return nil
@@ -555,6 +548,10 @@ type Config struct {
 	// up and this filter header state has diverged, then it'll remove the
 	// current on disk filter headers to sync them anew.
 	AssertFilterHeader *headerfs.FilterHeader
+
+	// CheckConnectivity is an option to force a CheckConectivity during
+	// NeutrinoDBStore initialization
+	CheckConectivity bool
 }
 
 // ChainService is instantiated with functional options
@@ -566,9 +563,7 @@ type ChainService struct {
 	started       int32
 	shutdown      int32
 
-	FilterDB         filterdb.FilterDatabase
-	BlockHeaders     headerfs.BlockHeaderStore
-	RegFilterHeaders *headerfs.FilterHeaderStore
+	NeutrinoDB *headerfs.NeutrinoDBStore
 
 	FilterCache *lru.Cache
 	BlockCache  *lru.Cache
@@ -594,7 +589,7 @@ type ChainService struct {
 	services             protocol.ServiceFlag
 	utxoScanner          *UtxoScanner
 	broadcaster          *pushtx.Broadcaster
-	banStore             banman.Store
+	banMgr               banmgr.BanMgr
 
 	mtxCFilter     sync.Mutex
 	pendingFilters map[*pendingFiltersReq]struct{}
@@ -664,7 +659,11 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 	// provided their own resolution function. If so, then we'll use that
 	// instead as this may be routing requests over an anonymizing network.
 	amgr := addrmgr.New(cfg.DataDir, nameResolver)
-
+	bmConfig := banmgr.Config{
+		DisableBanning: false,
+		IpWhiteList:    []string{},
+		BanThreashold:  BanThreshold,
+	}
 	s := ChainService{
 		chainParams:       cfg.ChainParams,
 		addrManager:       amgr,
@@ -683,6 +682,7 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 		pendingFilters:    make(map[*pendingFiltersReq]struct{}),
 		queries:           make(map[uint32]*Query),
 		invListeners:      make(map[chainhash.Hash][]chan *ServerPeer),
+		banMgr:            *banmgr.New(&bmConfig),
 	}
 
 	// We do the same for queryBatch.
@@ -694,7 +694,6 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 
 	var err er.R
 
-	s.FilterDB, err = filterdb.New(cfg.Database, cfg.ChainParams)
 	if err != nil {
 		return nil, err
 	}
@@ -711,14 +710,8 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 	}
 	s.BlockCache = lru.NewCache(blockCacheSize)
 
-	s.BlockHeaders, err = headerfs.NewBlockHeaderStore(
-		cfg.Database, &cfg.ChainParams,
-	)
-	if err != nil {
-		return nil, err
-	}
-	s.RegFilterHeaders, err = headerfs.NewFilterHeaderStore(
-		cfg.Database, &cfg.ChainParams, cfg.AssertFilterHeader, s.BlockHeaders,
+	s.NeutrinoDB, err = headerfs.NewNeutrinoDBStore(
+		cfg.Database, &cfg.ChainParams, cfg.CheckConectivity,
 	)
 	if err != nil {
 		return nil, err
@@ -853,7 +846,6 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 		RebroadcastInterval: pushtx.DefaultRebroadcastInterval,
 	})
 
-	s.banStore, err = banman.NewStore(cfg.Database)
 	if err != nil {
 		return nil, er.Errorf("unable to initialize ban store: %v", err)
 	}
@@ -906,12 +898,12 @@ func NewChainService(cfg Config) (*ChainService, er.R) {
 // BestBlock retrieves the most recent block's height and hash where we
 // have both the header and filter header ready.
 func (s *ChainService) BestBlock() (*waddrmgr.BlockStamp, er.R) {
-	bestHeader, bestHeight, err := s.BlockHeaders.ChainTip()
+	bestHeader, bestHeight, err := s.NeutrinoDB.BlockChainTip()
 	if err != nil {
 		return nil, err
 	}
 
-	_, filterHeight, err := s.RegFilterHeaders.ChainTip()
+	_, filterHeight, err := s.NeutrinoDB.FilterChainTip()
 	if err != nil {
 		return nil, err
 	}
@@ -920,7 +912,7 @@ func (s *ChainService) BestBlock() (*waddrmgr.BlockStamp, er.R) {
 	// previous block header if the filter headers are not caught up.
 	if filterHeight < bestHeight {
 		bestHeight = filterHeight
-		bestHeader, err = s.BlockHeaders.FetchHeaderByHeight(
+		bestHeader, err = s.NeutrinoDB.FetchBlockHeaderByHeight(
 			bestHeight,
 		)
 		if err != nil {
@@ -929,8 +921,9 @@ func (s *ChainService) BestBlock() (*waddrmgr.BlockStamp, er.R) {
 	}
 
 	return &waddrmgr.BlockStamp{
-		Height: int32(bestHeight),
-		Hash:   bestHeader.BlockHash(),
+		Height:    int32(bestHeight),
+		Hash:      bestHeader.BlockHash(),
+		Timestamp: bestHeader.Timestamp,
 	}, nil
 }
 
@@ -946,7 +939,7 @@ func (s *ChainService) GetActiveQueries() []*Query {
 
 // GetBlockHash returns the block hash at the given height.
 func (s *ChainService) GetBlockHash(height int64) (*chainhash.Hash, er.R) {
-	header, err := s.BlockHeaders.FetchHeaderByHeight(uint32(height))
+	header, err := s.NeutrinoDB.FetchBlockHeaderByHeight(uint32(height))
 	if err != nil {
 		return nil, err
 	}
@@ -958,20 +951,19 @@ func (s *ChainService) GetBlockHash(height int64) (*chainhash.Hash, er.R) {
 // error if the hash doesn't exist or is unknown.
 func (s *ChainService) GetBlockHeader(
 	blockHash *chainhash.Hash) (*wire.BlockHeader, er.R) {
-	header, _, err := s.BlockHeaders.FetchHeader(blockHash)
+	header, _, err := s.NeutrinoDB.FetchBlockHeader(blockHash)
 	return header, err
 }
 
 // GetBlockHeight gets the height of a block by its hash. An error is returned
 // if the given block hash is unknown.
 func (s *ChainService) GetBlockHeight(hash *chainhash.Hash) (int32, er.R) {
-	_, height, err := s.BlockHeaders.FetchHeader(hash)
+	_, height, err := s.NeutrinoDB.FetchBlockHeader(hash)
 	if err != nil {
 		return 0, err
 	}
 	return int32(height), nil
 }
-
 
 // addBanScore increases the persistent and decaying ban score fields by the
 // values passed as parameters. If the resulting score exceeds BanWarnThreshold,
@@ -979,78 +971,18 @@ func (s *ChainService) GetBlockHeight(hash *chainhash.Hash) (int32, er.R) {
 // the score is above the ban threshold, the peer will be banned and
 // disconnected.
 func (sp *ServerPeer) addBanScore(persistent, transient uint32, reason string) {
-	if transient == 0 && persistent == 0 {
-		// The score is not being increased, but a warning message is
-		// still logged if the score is above the warn threshold.
-		score := sp.banScore.Int()
-		if score > BanWarnThreshold {
-			log.Warnf("Misbehaving peer %s: %s -- ban score is "+
-				"%d, it was not increased this time", sp,
-				reason, score)
-		}
-		return
+	if sp.banMgr.AddBanScore(sp.Addr(), persistent, transient, reason) {
+		sp.Disconnect()
 	}
-
-	score := sp.banScore.Increase(persistent, transient)
-	if score > BanWarnThreshold {
-		log.Warnf("Misbehaving peer %s: %s -- ban score increased to %d",
-			sp, reason, score)
-
-		if score > BanThreshold {
-			peerAddr := sp.Addr()
-			err := sp.server.BanPeer(
-				peerAddr, banman.ExceededBanThreshold,
-			)
-			if err != nil {
-				log.Errorf("Unable to ban peer %v: %v",
-					peerAddr, err)
-			}
-
-			sp.Disconnect()
-		}
-	}
-}
-
-
-// BanPeer bans a peer due to a specific reason for a duration of BanDuration.
-func (s *ChainService) BanPeer(addr string, reason banman.Reason) er.R {
-	log.Warnf("Banning peer %v: duration=%v, reason=%v", addr, BanDuration,
-		reason)
-
-	ipNet, err := banman.ParseIPNet(addr, nil)
-	if err != nil {
-		return er.Errorf("unable to parse IP network for peer %v: %v",
-			addr, err)
-	}
-	return s.banStore.BanIPNet(ipNet, reason, BanDuration)
 }
 
 // IsBanned returns true if the peer is banned, and false otherwise.
 func (s *ChainService) IsBanned(addr string) bool {
-	ipNet, err := banman.ParseIPNet(addr, nil)
-	if err != nil {
-		log.Errorf("Unable to parse IP network for peer %v: %v", addr,
-			err)
-		return false
-	}
-	banStatus, err := s.banStore.Status(ipNet)
-	if err != nil {
-		log.Errorf("Unable to determine ban status for peer %v: %v",
-			addr, err)
-		return false
-	}
-
-	// Log how much time left the peer will remain banned for, if any.
-	if time.Now().Before(banStatus.Expiration) {
-		log.Debugf("Peer %v is banned for another %v", addr,
-			time.Until(banStatus.Expiration))
-	}
-
-	return banStatus.Banned
+	return s.banMgr.IsBanned(addr)
 }
 
-func (s *ChainService) BanStore() banman.Store {
-	return s.banStore
+func (s *ChainService) BanMgr() *banmgr.BanMgr {
+	return &s.banMgr
 }
 
 // AddPeer adds a new peer that has already been connected to the server.
@@ -1087,7 +1019,7 @@ func (s *ChainService) rollBackToHeight(tx walletdb.ReadWriteTx, height uint32) 
 	*waddrmgr.BlockStamp,
 	er.R,
 ) {
-	header, headerHeight, err := s.BlockHeaders.ChainTip1(tx)
+	header, headerHeight, err := s.NeutrinoDB.BlockChainTip1(tx)
 	if err != nil {
 		return nil, err
 	}
@@ -1096,38 +1028,25 @@ func (s *ChainService) rollBackToHeight(tx walletdb.ReadWriteTx, height uint32) 
 		Hash:   header.BlockHash(),
 	}
 
-	_, regHeight, err := s.RegFilterHeaders.ChainTip1(tx)
-	if err != nil {
-		return nil, err
-	}
-
 	for uint32(bs.Height) > height {
-		header, _, err := s.BlockHeaders.FetchHeader1(tx, &bs.Hash)
+		header, _, err := s.NeutrinoDB.FetchBlockHeader1(tx, &bs.Hash)
 		if err != nil {
 			return nil, err
 		}
 
 		newTip := &header.PrevBlock
 
-		// Only roll back filter headers if they've caught up this far.
-		if uint32(bs.Height) <= regHeight {
-			newFilterTip, err := s.RegFilterHeaders.RollbackLastBlock(tx)
-			if err != nil {
-				return nil, err
-			}
-			regHeight = uint32(newFilterTip.Height)
-		}
-
-		bs, err = s.BlockHeaders.RollbackLastBlock(tx)
+		rb, err := s.NeutrinoDB.RollbackLastBlock(tx)
 		if err != nil {
 			return nil, err
 		}
+		bs = rb.BlockHeader
 
 		// Notifications are asynchronous, so we include the previous
 		// header in the disconnected notification in case we're rolling
 		// back farther and the notification subscriber needs it but
 		// can't read it before it's deleted from the store.
-		prevHeader, _, err := s.BlockHeaders.FetchHeader1(tx, newTip)
+		prevHeader, _, err := s.NeutrinoDB.FetchBlockHeader1(tx, newTip)
 		if err != nil {
 			return nil, err
 		}
@@ -1610,20 +1529,20 @@ var _ ChainSource = (*RescanChainSource)(nil)
 // GetBlockHeaderByHeight returns the header of the block with the given height.
 func (s *RescanChainSource) GetBlockHeaderByHeight(
 	height uint32) (*wire.BlockHeader, er.R) {
-	return s.BlockHeaders.FetchHeaderByHeight(height)
+	return s.NeutrinoDB.FetchBlockHeaderByHeight(height)
 }
 
 // GetBlockHeader returns the header of the block with the given hash.
 func (s *RescanChainSource) GetBlockHeader(
 	hash *chainhash.Hash) (*wire.BlockHeader, uint32, er.R) {
-	return s.BlockHeaders.FetchHeader(hash)
+	return s.NeutrinoDB.FetchBlockHeader(hash)
 }
 
 // GetFilterHeaderByHeight returns the filter header of the block with the given
 // height.
 func (s *RescanChainSource) GetFilterHeaderByHeight(
 	height uint32) (*chainhash.Hash, er.R) {
-	return s.RegFilterHeaders.FetchHeaderByHeight(height)
+	return s.NeutrinoDB.FetchFilterHeaderByHeight(height)
 }
 
 // Subscribe returns a block subscription that delivers block notifications in

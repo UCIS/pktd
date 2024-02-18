@@ -176,14 +176,14 @@ func checkPaymentStatus(ctxt context.Context, node *lntest.HarnessNode,
 
 		// If this expected status is SUCCEEDED, we expect the final preimage.
 		case lnrpc.Payment_SUCCEEDED:
-			if p.PaymentPreimage != preimage.String() {
+			if string(p.PaymentPreimage) != preimage.String() {
 				return er.Errorf("preimage doesn't match: %v vs %v",
 					p.PaymentPreimage, preimage.String())
 			}
 
 		// Otherwise we expect an all-zero preimage.
 		default:
-			if p.PaymentPreimage != (lntypes.Preimage{}).String() {
+			if string(p.PaymentPreimage) != (lntypes.Preimage{}).String() {
 				return er.Errorf("expected zero preimage, got %v",
 					p.PaymentPreimage)
 			}

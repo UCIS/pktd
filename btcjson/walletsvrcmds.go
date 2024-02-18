@@ -253,6 +253,26 @@ type SendFromCmd struct {
 	MinHeight     *int
 }
 
+type SendVoteCmd struct {
+	// The address to use for casting the vote
+	FromAddress string
+	// The address to vote for becoming Network Steward
+	// If this is the empty string then it will be considered that there is no vote
+	// Casting a non-vote is useful to withdraw a pervious vote without casting a new one.
+	VoteFor string
+	// True if you want to candidate for possibly becoming the Network Steward.
+	IsCandidate *bool
+	// Do not source funds from any payment with less than this number of confirmations
+	// default 1 = anything which is in the blockchain at all
+	MinConf *uint32
+	// Do not source funds from any more inputs than this
+	// default 0 = no limit
+	MaxInputs *uint32
+	// Do not source funds from any payments OLDER (lower block height) than this number
+	// default 0 = no limit
+	MinHeight *uint32
+}
+
 // NewSendFromCmd returns a new instance which can be used to issue a sendfrom
 // JSON-RPC command.
 //
@@ -281,6 +301,7 @@ type CreateTransactionCmd struct {
 	Vote           *bool
 	MaxInputs      *int
 	AutoLock       *string
+	NoSign         *bool
 }
 
 // SendManyCmd defines the sendmany JSON-RPC command.
@@ -464,6 +485,7 @@ func init() {
 	MustRegisterCmd("sendfrom", (*SendFromCmd)(nil), flags)
 	MustRegisterCmd("sendmany", (*SendManyCmd)(nil), flags)
 	MustRegisterCmd("sendtoaddress", (*SendToAddressCmd)(nil), flags)
+	MustRegisterCmd("sendvote", (*SendVoteCmd)(nil), flags)
 	MustRegisterCmd("setnetworkstewardvote", (*SetNetworkStewardVoteCmd)(nil), flags)
 	MustRegisterCmd("settxfee", (*SetTxFeeCmd)(nil), flags)
 	MustRegisterCmd("signmessage", (*SignMessageCmd)(nil), flags)

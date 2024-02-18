@@ -61,10 +61,13 @@ func (w *Wallet) FundPsbt(packet *psbt.Packet, account uint32,
 	}
 
 	// Let's find out the amount to fund first.
-	amt := int64(0)
-	for _, output := range txOut {
-		amt += output.Value
-	}
+	//	amt is unused
+	/*
+		amt := int64(0)
+		for _, output := range txOut {
+			amt += output.Value
+		}
+	*/
 
 	// addInputInfo is a helper function that fetches the UTXO information
 	// of an input and attaches it to the PSBT packet.
@@ -112,7 +115,7 @@ func (w *Wallet) FundPsbt(packet *psbt.Packet, account uint32,
 			FeeSatPerKB: feeSatPerKB,
 			Minconf:     1,
 			Outputs:     packet.UnsignedTx.TxOut,
-			DryRun:      false,
+			SendMode:    SendModeBcasted,
 		})
 		if err != nil {
 			return 0, er.Errorf("error creating funding TX: %v",

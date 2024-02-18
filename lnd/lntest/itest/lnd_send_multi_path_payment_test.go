@@ -79,7 +79,7 @@ func testSendMultiPathPayment(net *lntest.NetworkHarness, t *harnessTest) {
 	)
 
 	// Make sure we got the preimage.
-	if payment.PaymentPreimage != hex.EncodeToString(invoices[0].RPreimage) {
+	if string(payment.PaymentPreimage) != hex.EncodeToString(invoices[0].RPreimage) {
 		t.Fatalf("preimage doesn't match")
 	}
 

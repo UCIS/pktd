@@ -2,7 +2,8 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-//+build !generate
+//go:build !generate
+// +build !generate
 
 package rpchelp
 
@@ -33,6 +34,7 @@ var helpDescsEnUS = map[string]string{
 	"createtransaction-inputminheight": "The minimum block height to take inputs from (default: 0)",
 	"createtransaction-maxinputs":      "Maximum number of transaction inputs that are allowed",
 	"createtransaction-autolock":       "If specified, all txouts spent for this transaction will be locked under this name",
+	"createtransaction-nosign":         "If specified, create an *unsigned* transaction",
 	"createtransaction--result0":       "The hex encoded transaction result",
 
 	// GetAddressBalancesCmd help.
@@ -49,6 +51,14 @@ var helpDescsEnUS = map[string]string{
 	"getaddressbalancesresult-sunconfirmed":    "Unconfirmed balance (atomic units as base 10 string)",
 	"getaddressbalancesresult-address":         "The address which has this balance",
 	"getaddressbalancesresult-outputcount":     "The number of transaction outputs which make up the balance",
+	"getaddressbalancesresult-vote":            "If the address has a valid vote on record, the vote",
+
+	"addressvoteinfo-estimated_expiration_sec": "The time when we estimate the vote will expire, based on block time targets. Seconds since the epoch.",
+	"addressvoteinfo-expiration_block":         "The block number at which this vote will expire, if not renewed",
+	"addressvoteinfo-vote_block":               "The block number in which this vote was cast",
+	"addressvoteinfo-vote_txid":                "The transaction ID of this vote transaction",
+	"addressvoteinfo-vote_for":                 "The address who is being voted for",
+	"addressvoteinfo-is_candidate":             "True if this address has indicated it's desire to candidate for Network Steward",
 
 	"getwalletseed--synopsis": "Get the wallet seed words for this wallet",
 	"getwalletseed--result0":  "The seed words used, along with the wallet passphrase, to create the wallet",
@@ -264,9 +274,7 @@ var helpDescsEnUS = map[string]string{
 	"listunspentresult-txid":          "The transaction hash of the referenced output",
 	"listunspentresult-vout":          "The output index of the referenced output",
 	"listunspentresult-address":       "The payment address that received the output",
-	"listunspentresult-account":       "The account associated with the receiving payment address",
 	"listunspentresult-scriptPubKey":  "The output script encoded as a hexadecimal string",
-	"listunspentresult-redeemScript":  "Unset",
 	"listunspentresult-amount":        "The amount of the output valued in bitcoin",
 	"listunspentresult-confirmations": "The number of block confirmations of the transaction",
 	"listunspentresult-spendable":     "Whether the output is entirely controlled by wallet keys/scripts (false for partially controlled multisig outputs or outputs to watch-only addresses)",
@@ -318,6 +326,21 @@ var helpDescsEnUS = map[string]string{
 	"sendtoaddress-comment":   "Unused",
 	"sendtoaddress-commentto": "Unused",
 	"sendtoaddress--result0":  "The transaction hash of the sent transaction",
+
+	"sendvote--synopsis": "Authors, signs, and sends a vote transaction to vote in the new Network Steward\n" +
+		"election system. Vote transactions are not entirely free, they must pay normal\n" +
+		"transaction fees like any other, so they must source coins from an input address\n" +
+		"and make change.\n\n" +
+		"Unlike normal transactions, vote transactions CANNOT contain more than one input\n" +
+		"address. This address is considered to be the voter, and the vote is weighted based\n" +
+		"on the number of coins this address has.",
+	"sendvote-fromaddress": "The address to use for casting the vote",
+	"sendvote-votefor":     "The address to vote for",
+	"sendvote-iscandidate": "If true, then this wallet will candidate to become Network Steward",
+	"sendvote-minconf":     "Minimum number of block confirmations required before a transaction output is eligible to be spent",
+	"sendvote-maxinputs":   "Maximum number of transaction inputs that are allowed",
+	"sendvote-minheight":   "Do not source inputs from that are newer than this block number",
+	"sendvote--result0":    "The transaction hash of the sent vote transaction",
 
 	// SetTxFeeCmd help.
 	"settxfee--synopsis": "Modify the increment used each time more fee is required for an authored transaction.",

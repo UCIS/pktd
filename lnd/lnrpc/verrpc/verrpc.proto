@@ -7,7 +7,10 @@ option go_package = "github.com/pkt-cash/pktd/lnd/lnrpc/verrpc";
 // Versioner is a service that can be used to get information about the version
 // and build information of the running daemon.
 service Versioner {
-    /* lncli: `version`
+    /*
+    $pld.category: `Meta`
+    $pld.short_description: `Display pldctl and pld version info`
+
     GetVersion returns the current version and build information of the running
     daemon.
     */

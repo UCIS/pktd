@@ -4,13 +4,11 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/btcutil/gcs"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
-	"github.com/pkt-cash/pktd/neutrino/filterdb"
 )
 
 // FilterCacheKey represents the key used to access filters in the FilterCache.
 type FilterCacheKey struct {
-	BlockHash  chainhash.Hash
-	FilterType filterdb.FilterType
+	BlockHash chainhash.Hash
 }
 
 // CacheableFilter is a wrapper around Filter type which provides a Size method

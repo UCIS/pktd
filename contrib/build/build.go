@@ -9,8 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"strings"
 	"runtime"
+	"strings"
 )
 
 // generic stuff
@@ -130,7 +130,9 @@ func main() {
 	build("pktctl", "./cmd/pktctl", &conf)
 	build("checksig", "./cmd/checksig", &conf)
 	build("pld", "./lnd/cmd/lnd", &conf)
-	build("pldctl", "./lnd/cmd/lncli", &conf)
+	//	no need to compile and build the old version of pldctl
+	//		build("pldctl", "./lnd/cmd/lncli", &conf)
+	build("pldctl", "./lnd/cmd/lndcli", &conf)
 	if strings.Contains(strings.Join(os.Args, "|"), "--test") {
 		test()
 	} else {

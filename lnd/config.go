@@ -119,16 +119,25 @@ const (
 	// commitment output.
 	// TODO(halseth): find a more scientific choice of value.
 	defaultMaxLocalCSVDelay = 10000
+
+	//default wallet filename
+	defaultWalletFile = "wallet.db"
 )
 
 var (
-	// DefaultLndDir is the default directory where lnd tries to find its
+	// DefaultPktDir is the default directory where pkt tries to find its
 	// configuration file and store its data. This is a directory in the
 	// user's application data, for example:
-	//   C:\Users\<username>\AppData\Local\Lnd on Windows
-	//   ~/.lnd on Linux
-	//   ~/Library/Application Support/Lnd on MacOS
-	DefaultLndDir = btcutil.AppDataDir("lnd", false)
+	//   C:\Users\<username>\AppData\Local\pktwallet on Windows
+	//   ~/.pktwallet on Linux
+	//   ~/Library/Application Support/pktwallet on MacOS
+	defaultPktDir = btcutil.AppDataDir("pktwallet", false)
+	// subdirectory where the wallet.db should be
+	defaultPktWalletDir = filepath.Join(defaultPktDir, "pkt")
+
+	// lnd folder should be under the main defaultPktDir
+	// e.g. ~/.pktwallet/lnd
+	DefaultLndDir = filepath.Join(defaultPktDir, "lnd")
 
 	// DefaultConfigFile is the default full path of lnd's configuration
 	// file.
@@ -172,29 +181,26 @@ type Config struct {
 	ShowVersion bool `short:"V" long:"version" description:"Display version information and exit"`
 
 	LndDir       string `long:"lnddir" description:"The base directory that contains lnd's data, logs, configuration file, etc."`
+	PktDir       string `long:"pktdir" description:"The base directory that contains pktwallet's data etc."`
 	ConfigFile   string `short:"C" long:"configfile" description:"Path to configuration file"`
-	DataDir      string `short:"b" long:"datadir" description:"The directory to store lnd's data within"`
-	SyncFreelist bool   `long:"sync-freelist" description:"Whether the databases used within lnd should sync their freelist to disk. This is disabled by default resulting in improved memory performance during operation, but with an increase in startup time."`
+	DataDir      string `short:"b" long:"datadir" description:"The directory to store pld's data within"`
+	WalletFile   string `long:"wallet" description:"Wallet file name or path, if a simple word such as 'personal' then pktwallet will look for wallet_personal.db, if prefixed with a / then pktwallet will consider it an absolute path. (default: wallet.db)"`
+	SyncFreelist bool   `long:"sync-freelist" description:"Whether the databases used within pld should sync their freelist to disk. This is disabled by default resulting in improved memory performance during operation, but with an increase in startup time."`
 
-	NoTLS              bool     `long:"notls" description:"Disable TLS on RPC and REST"`
-	TLSCertPath        string   `long:"tlscertpath" description:"Path to write the TLS certificate for lnd's RPC and REST services"`
-	TLSKeyPath         string   `long:"tlskeypath" description:"Path to write the TLS private key for lnd's RPC and REST services"`
-	TLSExtraIPs        []string `long:"tlsextraip" description:"Adds an extra ip to the generated certificate"`
-	TLSExtraDomains    []string `long:"tlsextradomain" description:"Adds an extra domain to the generated certificate"`
-	TLSAutoRefresh     bool     `long:"tlsautorefresh" description:"Re-generate TLS certificate and key if the IPs or domains are changed"`
-	TLSDisableAutofill bool     `long:"tlsdisableautofill" description:"Do not include the interface IPs or the system hostname in TLS certificate, use first --tlsextradomain as Common Name instead, if set"`
+	//	we want to disable the use of macaroons just for the users so,
+	//	no more CLI options, config ini options or help for the following Config fields
+	NoMacaroons    bool
+	AdminMacPath   string
+	ReadMacPath    string
+	InvoiceMacPath string
 
-	NoMacaroons     bool          `long:"no-macaroons" description:"Disable macaroon authentication, can only be used if server is not listening on a public interface."`
-	AdminMacPath    string        `long:"adminmacaroonpath" description:"Path to write the admin macaroon for lnd's RPC and REST services if it doesn't exist"`
-	ReadMacPath     string        `long:"readonlymacaroonpath" description:"Path to write the read-only macaroon for lnd's RPC and REST services if it doesn't exist"`
-	InvoiceMacPath  string        `long:"invoicemacaroonpath" description:"Path to the invoice-only macaroon for lnd's RPC and REST services if it doesn't exist"`
 	LogDir          string        `long:"logdir" description:"Directory to log output."`
 	MaxLogFiles     int           `long:"maxlogfiles" description:"Maximum logfiles to keep (0 for no rotation)"`
 	MaxLogFileSize  int           `long:"maxlogfilesize" description:"Maximum logfile size in MB"`
 	AcceptorTimeout time.Duration `long:"acceptortimeout" description:"Time after which an RPCAcceptor will time out and return false if it hasn't yet received a response"`
 
 	LetsEncryptDir    string `long:"letsencryptdir" description:"The directory to store Let's Encrypt certificates within"`
-	LetsEncryptListen string `long:"letsencryptlisten" description:"The IP:port on which lnd will listen for Let's Encrypt challenges. Let's Encrypt will always try to contact on port 80. Often non-root processes are not allowed to bind to ports lower than 1024. This configuration option allows a different port to be used, but must be used in combination with port forwarding from port 80. This configuration can also be used to specify another IP address to listen on, for example an IPv6 address."`
+	LetsEncryptListen string `long:"letsencryptlisten" description:"The IP:port on which pld will listen for Let's Encrypt challenges. Let's Encrypt will always try to contact on port 80. Often non-root processes are not allowed to bind to ports lower than 1024. This configuration option allows a different port to be used, but must be used in combination with port forwarding from port 80. This configuration can also be used to specify another IP address to listen on, for example an IPv6 address."`
 	LetsEncryptDomain string `long:"letsencryptdomain" description:"Request a Let's Encrypt certificate for this domain. Note that the certicate is only requested and stored when the first rpc connection comes in."`
 
 	// We'll parse these 'raw' string arguments into real net.Addrs in the
@@ -213,7 +219,6 @@ type Config struct {
 	ExternalIPs       []net.Addr
 	DisableListen     bool          `long:"nolisten" description:"Disable listening for incoming peer connections"`
 	DisableRest       bool          `long:"norest" description:"Disable REST API"`
-	DisableRestTLS    bool          `long:"no-rest-tls" description:"Disable TLS for REST connections"`
 	NAT               bool          `long:"nat" description:"Toggle NAT traversal support (using either UPnP or NAT-PMP) to automatically advertise your external IP address to the network -- NOTE this does not support devices behind multiple NATs"`
 	MinBackoff        time.Duration `long:"minbackoff" description:"Shortest backoff when reconnecting to persistent peers. Valid time units are {s, m, h}."`
 	MaxBackoff        time.Duration `long:"maxbackoff" description:"Longest backoff when reconnecting to persistent peers. Valid time units are {s, m, h}."`
@@ -240,8 +245,8 @@ type Config struct {
 	Litecoin      *lncfg.Chain    `group:"Litecoin" namespace:"litecoin"`
 	LtcdMode      *lncfg.Btcd     `group:"ltcd" namespace:"ltcd"`
 	LitecoindMode *lncfg.Bitcoind `group:"litecoind" namespace:"litecoind"`
-
-	Pkt *lncfg.Chain `group:"PKT" namespace:"pkt"`
+	Pktmode       *lncfg.Pkt
+	Pkt           *lncfg.Chain `group:"PKT" namespace:"pkt"`
 
 	Autopilot *lncfg.AutoPilot `group:"Autopilot" namespace:"autopilot"`
 
@@ -255,7 +260,7 @@ type Config struct {
 
 	NoSeedBackup bool `long:"noseedbackup" description:"If true, NO SEED WILL BE EXPOSED -- EVER, AND THE WALLET WILL BE ENCRYPTED USING THE DEFAULT PASSPHRASE. THIS FLAG IS ONLY FOR TESTING AND SHOULD NEVER BE USED ON MAINNET."`
 
-	ResetWalletTransactions bool `long:"reset-wallet-transactions" description:"Removes all transaction history from the on-chain wallet on startup, forcing a full chain rescan starting at the wallet's birthday. Implements the same functionality as btcwallet's dropwtxmgr command. Should be set to false after successful execution to avoid rescanning on every restart of lnd."`
+	ResetWalletTransactions bool `long:"reset-wallet-transactions" description:"Removes all transaction history from the on-chain wallet on startup, forcing a full chain rescan starting at the wallet's birthday. Implements the same functionality as btcwallet's dropwtxmgr command. Should be set to false after successful execution to avoid rescanning on every restart of pld."`
 
 	PaymentsExpirationGracePeriod time.Duration `long:"payments-expiration-grace-period" description:"A period to wait before force closing channels with outgoing htlcs that have timed-out and are a result of this node initiated payments."`
 	TrickleDelay                  int           `long:"trickledelay" description:"Time in milliseconds between each release of announcements to the network"`
@@ -275,9 +280,9 @@ type Config struct {
 
 	IgnoreHistoricalGossipFilters bool `long:"ignore-historical-gossip-filters" description:"If true, will not reply with historical data that matches the range specified by a remote peer's gossip_timestamp_filter. Doing so will result in lower memory and bandwidth requirements."`
 
-	RejectPush bool `long:"rejectpush" description:"If true, lnd will not accept channel opening requests with non-zero push amounts. This should prevent accidental pushes to merchant nodes."`
+	RejectPush bool `long:"rejectpush" description:"If true, pld will not accept channel opening requests with non-zero push amounts. This should prevent accidental pushes to merchant nodes."`
 
-	RejectHTLC bool `long:"rejecthtlc" description:"If true, lnd will not forward any HTLCs that are meant as onward payments. This option will still allow lnd to send HTLCs and receive HTLCs but lnd won't be used as a hop."`
+	RejectHTLC bool `long:"rejecthtlc" description:"If true, pld will not forward any HTLCs that are meant as onward payments. This option will still allow pld to send HTLCs and receive HTLCs but pld won't be used as a hop."`
 
 	StaggerInitialReconnect bool `long:"stagger-initial-reconnect" description:"If true, will apply a randomized staggering between 0s and 30s when reconnecting to persistent peers on startup. The first 10 reconnections will be attempted instantly, regardless of the flag's value"`
 
@@ -285,7 +290,7 @@ type Config struct {
 
 	MaxChannelFeeAllocation float64 `long:"max-channel-fee-allocation" description:"The maximum percentage of total funds that can be allocated to a channel's commitment fee. This only applies for the initiator of the channel. Valid values are within [0.1, 1]."`
 
-	DryRunMigration bool `long:"dry-run-migration" description:"If true, lnd will abort committing a migration if it would otherwise have been successful. This leaves the database unmodified, and still compatible with the previously active version of lnd."`
+	DryRunMigration bool `long:"dry-run-migration" description:"If true, pld will abort committing a migration if it would otherwise have been successful. This leaves the database unmodified, and still compatible with the previously active version of pld."`
 
 	net tor.Net
 
@@ -336,12 +341,11 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		LndDir:            DefaultLndDir,
+		PktDir:            defaultPktWalletDir,
 		ConfigFile:        DefaultConfigFile,
 		DataDir:           defaultDataDir,
+		WalletFile:        defaultWalletFile,
 		DebugLevel:        defaultLogLevel,
-		NoTLS:             false,
-		TLSCertPath:       defaultTLSCertPath,
-		TLSKeyPath:        defaultTLSKeyPath,
 		LetsEncryptDir:    defaultLetsEncryptDir,
 		LetsEncryptListen: defaultLetsEncryptListen,
 		LogDir:            defaultLogDir,
@@ -385,6 +389,11 @@ func DefaultConfig() Config {
 			Dir:          defaultLitecoindDir,
 			RPCHost:      defaultRPCHost,
 			EstimateMode: defaultBitcoindEstimateMode,
+		},
+		Pktmode: &lncfg.Pkt{
+			Dir:       defaultPktDir,
+			WalletDir: defaultPktWalletDir,
+			RPCHost:   defaultRPCHost,
 		},
 		Pkt: &lncfg.Chain{
 			MinHTLCIn:     chainreg.DefaultPktMinHTLCInMSat,
@@ -564,8 +573,6 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 		cfg.LetsEncryptDir = filepath.Join(
 			lndDir, defaultLetsEncryptDirname,
 		)
-		cfg.TLSCertPath = filepath.Join(lndDir, defaultTLSCertFilename)
-		cfg.TLSKeyPath = filepath.Join(lndDir, defaultTLSKeyFilename)
 		cfg.LogDir = filepath.Join(lndDir, defaultLogDirname)
 
 		// If the watchtower's directory is set to the default, i.e. the
@@ -595,7 +602,7 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 				err = er.E(errr)
 			}
 
-			str := "%s: Failed to create lnd directory: %v"
+			str := "%s: Failed to create pld directory: %v"
 			err = er.Errorf(str, funcName, err)
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			return err
@@ -608,8 +615,7 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 	// to directories and files are cleaned and expanded before attempting
 	// to use them later on.
 	cfg.DataDir = CleanAndExpandPath(cfg.DataDir)
-	cfg.TLSCertPath = CleanAndExpandPath(cfg.TLSCertPath)
-	cfg.TLSKeyPath = CleanAndExpandPath(cfg.TLSKeyPath)
+	cfg.PktDir = CleanAndExpandPath(cfg.PktDir)
 	cfg.LetsEncryptDir = CleanAndExpandPath(cfg.LetsEncryptDir)
 	cfg.AdminMacPath = CleanAndExpandPath(cfg.AdminMacPath)
 	cfg.ReadMacPath = CleanAndExpandPath(cfg.ReadMacPath)
@@ -628,8 +634,8 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 	// for files that point to outside of the lnddir.
 	dirs := []string{
 		lndDir, cfg.DataDir,
+		cfg.PktDir,
 		cfg.LetsEncryptDir, cfg.Watchtower.TowerDir,
-		filepath.Dir(cfg.TLSCertPath), filepath.Dir(cfg.TLSKeyPath),
 		filepath.Dir(cfg.AdminMacPath), filepath.Dir(cfg.ReadMacPath),
 		filepath.Dir(cfg.InvoiceMacPath),
 		filepath.Dir(cfg.Tor.PrivateKeyPath),
@@ -1185,8 +1191,9 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 	// have specified a safe combo for authentication. If not, we'll bail
 	// out with an error. Since we don't allow disabling TLS for gRPC
 	// connections we pass in tlsActive=true.
+	// pktwallet: we disable tls so tlsActive=false
 	err = lncfg.EnforceSafeAuthentication(
-		cfg.RPCListeners, !cfg.NoMacaroons, true,
+		cfg.RPCListeners, !cfg.NoMacaroons, false,
 	)
 	if err != nil {
 		return nil, err
@@ -1197,7 +1204,7 @@ func ValidateConfig(cfg Config, usageMessage string) (*Config, er.R) {
 		cfg.RESTListeners = nil
 	} else {
 		err = lncfg.EnforceSafeAuthentication(
-			cfg.RESTListeners, !cfg.NoMacaroons, !cfg.DisableRestTLS,
+			cfg.RESTListeners, !cfg.NoMacaroons, false,
 		)
 		if err != nil {
 			return nil, err

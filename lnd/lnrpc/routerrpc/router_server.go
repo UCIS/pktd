@@ -190,10 +190,6 @@ func New(cfg *Config) (*Server, lnrpc.MacaroonPerms, er.R) {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Start() er.R {
-	if atomic.AddInt32(&s.started, 1) != 1 {
-		return nil
-	}
-
 	return nil
 }
 
@@ -201,11 +197,6 @@ func (s *Server) Start() er.R {
 //
 // NOTE: This is part of the lnrpc.SubServer interface.
 func (s *Server) Stop() er.R {
-	if atomic.AddInt32(&s.shutdown, 1) != 1 {
-		return nil
-	}
-
-	close(s.quit)
 	return nil
 }
 

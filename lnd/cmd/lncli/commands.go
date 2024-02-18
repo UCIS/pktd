@@ -93,12 +93,13 @@ func actionDecorator(f func(*cli.Context) er.R) func(*cli.Context) er.R {
 			// running, but the RPC server is not active yet (only
 			// WalletUnlocker server active) and most likely this
 			// is because of an encrypted wallet.
-			if ok && s.Code() == codes.Unimplemented {
+			// exclude getinfo in order to work even when wallet is locked
+			if ok && s.Code() == codes.Unimplemented && c.Command.Name != "getinfo" {
 				return er.Errorf("Wallet is encrypted. " +
-					"Please unlock using 'lncli unlock', " +
-					"or set password using 'lncli create'" +
+					"Please unlock using 'pldctl unlock', " +
+					"or set password using 'pldctl create'" +
 					" if this is the first time starting " +
-					"lnd.")
+					"pld.")
 			}
 			return err
 		}
@@ -517,7 +518,7 @@ func sendMany(ctx *cli.Context) er.R {
 var connectCommand = cli.Command{
 	Name:      "connect",
 	Category:  "Peers",
-	Usage:     "Connect to a remote lnd peer.",
+	Usage:     "Connect to a remote pld peer.",
 	ArgsUsage: "<pubkey>@host",
 	Description: `
 	Connect to a peer using its <pubkey> and host.
@@ -579,7 +580,7 @@ func connectPeer(ctx *cli.Context) er.R {
 var disconnectCommand = cli.Command{
 	Name:      "disconnect",
 	Category:  "Peers",
-	Usage:     "Disconnect a remote lnd peer identified by public key.",
+	Usage:     "Disconnect a remote pld peer identified by public key.",
 	ArgsUsage: "<pubkey>",
 	Flags: []cli.Flag{
 		cli.StringFlag{
@@ -607,7 +608,7 @@ func disconnectPeer(ctx *cli.Context) er.R {
 	}
 
 	req := &lnrpc.DisconnectPeerRequest{
-		PubKey: pubKey,
+		PubKey: []byte(pubKey),
 	}
 
 	lnid, err := client.DisconnectPeer(ctxb, req)
@@ -935,7 +936,7 @@ func closeAllChannels(ctx *cli.Context) er.R {
 	for _, channel := range channelsToClose {
 		go func(channel *lnrpc.Channel) {
 			res := result{}
-			res.RemotePubKey = channel.RemotePubkey
+			res.RemotePubKey = string(channel.RemotePubkey)
 			res.ChannelPoint = channel.ChannelPoint
 			defer func() {
 				resultChan <- res
@@ -1021,9 +1022,9 @@ var abandonChannelCommand = cli.Command{
 	Description: `
 	Removes all channel state from the database except for a close
 	summary. This method can be used to get rid of permanently unusable
-	channels due to bugs fixed in newer versions of lnd.
+	channels due to bugs fixed in newer versions of pld.
 
-	Only available when lnd is built in debug mode.
+	Only available when pld is built in debug mode.
 
 	To view which funding_txids/output_indexes can be used for this command,
 	see the channel_point values within the listchannels command output.
@@ -1240,16 +1241,16 @@ var getInfoCommand = cli.Command{
 
 func getInfo(ctx *cli.Context) er.R {
 	ctxb := context.Background()
-	client, cleanUp := getClient(ctx)
-	defer cleanUp()
-
-	req := &lnrpc.GetInfoRequest{}
-	resp, err := client.GetInfo(ctxb, req)
-	if err != nil {
-		return er.E(err)
+	// call getinfo2 from metaservice hat will return some info even when wallet is locked
+	metaclient, cleanUpMeta := getMetaServiceClient(ctx)
+	defer cleanUpMeta()
+	info2req := &lnrpc.GetInfo2Request{}
+	info2resp, info2err := metaclient.GetInfo2(ctxb, info2req)
+	if info2err != nil {
+		return er.E(info2err)
 	}
 
-	printRespJSON(resp)
+	printRespJSON(info2resp)
 	return nil
 }
 
@@ -1641,7 +1642,7 @@ func getNodeInfo(ctx *cli.Context) er.R {
 	}
 
 	req := &lnrpc.NodeInfoRequest{
-		PubKey:          pubKey,
+		PubKey:          []byte(pubKey),
 		IncludeChannels: ctx.Bool("include_channels"),
 	}
 
@@ -1741,7 +1742,7 @@ func queryRoutes(ctx *cli.Context) er.R {
 	}
 
 	req := &lnrpc.QueryRoutesRequest{
-		PubKey:            dest,
+		PubKey:            []byte(dest),
 		Amt:               amt,
 		FeeLimit:          feeLimit,
 		FinalCltvDelta:    int32(ctx.Int("final_cltv_delta")),
@@ -1935,19 +1936,19 @@ func stopDaemon(ctx *cli.Context) er.R {
 }
 
 var signMessageCommand = cli.Command{
-	Name:      "signmessage",
-	Category:  "Wallet",
-	Usage:     "Sign a message with the node's private key.",
-	ArgsUsage: "msg",
-	Description: `
-	Sign msg with the resident node's private key.
-	Returns the signature as a zbase32 string.
-
-	Positional arguments and flags can be used interchangeably but not at the same time!`,
+	Name:        "signmessage",
+	Category:    "Wallet",
+	Usage:       "Signs a message using the private key of a payment address.",
+	ArgsUsage:   "address=\"...\" msg=\"...\"",
+	Description: `Signs a message using the private key of a payment address.`,
 	Flags: []cli.Flag{
 		cli.StringFlag{
+			Name:  "address",
+			Usage: "Payment address of private key used to sign the message with",
+		},
+		cli.StringFlag{
 			Name:  "msg",
-			Usage: "the message to sign",
+			Usage: "Message to sign",
 		},
 	},
 	Action: actionDecorator(signMessage),
@@ -1958,83 +1959,25 @@ func signMessage(ctx *cli.Context) er.R {
 	client, cleanUp := getClient(ctx)
 	defer cleanUp()
 
-	var msg []byte
-
-	switch {
-	case ctx.IsSet("msg"):
-		msg = []byte(ctx.String("msg"))
-	case ctx.Args().Present():
-		msg = []byte(ctx.Args().First())
-	default:
-		return er.Errorf("msg argument missing")
-	}
-
-	resp, err := client.SignMessage(ctxb, &lnrpc.SignMessageRequest{Msg: msg})
-	if err != nil {
-		return er.E(err)
-	}
-
-	printRespJSON(resp)
-	return nil
-}
-
-var verifyMessageCommand = cli.Command{
-	Name:      "verifymessage",
-	Category:  "Wallet",
-	Usage:     "Verify a message signed with the signature.",
-	ArgsUsage: "msg signature",
-	Description: `
-	Verify that the message was signed with a properly-formed signature
-	The signature must be zbase32 encoded and signed with the private key of
-	an active node in the resident node's channel database.
-
-	Positional arguments and flags can be used interchangeably but not at the same time!`,
-	Flags: []cli.Flag{
-		cli.StringFlag{
-			Name:  "msg",
-			Usage: "the message to verify",
-		},
-		cli.StringFlag{
-			Name:  "sig",
-			Usage: "the zbase32 encoded signature of the message",
-		},
-	},
-	Action: actionDecorator(verifyMessage),
-}
-
-func verifyMessage(ctx *cli.Context) er.R {
-	ctxb := context.Background()
-	client, cleanUp := getClient(ctx)
-	defer cleanUp()
-
-	var (
-		msg []byte
-		sig string
-	)
-
 	args := ctx.Args()
 
-	switch {
-	case ctx.IsSet("msg"):
-		msg = []byte(ctx.String("msg"))
-	case args.Present():
-		msg = []byte(ctx.Args().First())
-		args = args.Tail()
-	default:
+	var address string
+	var msg []byte
+	if len(args) > 0 {
+		address = args[0]
+	} else {
+		return er.Errorf("address argument missing")
+	}
+	if len(args) > 1 {
+		msg = []byte(args[1])
+	} else {
 		return er.Errorf("msg argument missing")
 	}
 
-	switch {
-	case ctx.IsSet("sig"):
-		sig = ctx.String("sig")
-	case args.Present():
-		sig = args.First()
-	default:
-		return er.Errorf("signature argument missing")
-	}
-
-	req := &lnrpc.VerifyMessageRequest{Msg: msg, Signature: sig}
-	resp, err := client.VerifyMessage(ctxb, req)
+	resp, err := client.SignMessage(ctxb, &lnrpc.SignMessageRequest{
+		MsgBin:  msg,
+		Address: address,
+	})
 	if err != nil {
 		return er.E(err)
 	}
@@ -2423,7 +2366,7 @@ var exportChanBackupCommand = cli.Command{
 			if specified, then rather than printing a JSON output
 			of the static channel backup, a serialized version of
 			the backup (either Single or Multi) will be written to
-			the target file, this is the same format used by lnd in
+			the target file, this is the same format used by pld in
 			its channels.backup file `,
 		},
 	},
@@ -2553,7 +2496,7 @@ var verifyChanBackupCommand = cli.Command{
 	 static channel backups in single blob.
 
        * A file path which points to a packed multi-channel backup within a
-	 file, using the same format that lnd does in its channels.backup
+	 file, using the same format that pld does in its channels.backup
 	 file.
     `,
 	Flags: []cli.Flag{
@@ -2619,7 +2562,7 @@ var restoreChanBackupCommand = cli.Command{
 	ArgsUsage: "[--single_backup] [--multi_backup] [--multi_file=",
 	Description: `
 	Allows a user to restore a Static Channel Backup (SCB) that was
-	obtained either via the exportchanbackup command, or from lnd's
+	obtained either via the exportchanbackup command, or from pld's
 	automatically manged channels.backup file. This command should be used
 	if a user is attempting to restore a channel due to data loss on a
 	running node restored with the same seed as the node that created the
@@ -2635,7 +2578,7 @@ var restoreChanBackupCommand = cli.Command{
 	     static channel backups in single blob.
 
 	   * A file path which points to a packed multi-channel backup within a
-	     file, using the same format that lnd does in its channels.backup
+	     file, using the same format that pld does in its channels.backup
 	     file.
 	`,
 	Flags: []cli.Flag{
@@ -2743,5 +2686,800 @@ func restoreChanBackup(ctx *cli.Context) er.R {
 		return er.Errorf("unable to restore chan backups: %v", errr)
 	}
 
+	return nil
+}
+
+var resyncCommand = cli.Command{
+	Name:        "resync",
+	Category:    "Wallet",
+	Usage:       "Scan over the chain to find any transactions which may not have been recorded in the wallet's database",
+	ArgsUsage:   "",
+	Description: `Scan over the chain to find any transactions which may not have been recorded in the wallet's database`,
+	Flags: []cli.Flag{
+		cli.Int64Flag{
+			Name:  "fromHeight",
+			Usage: "Start re-syncing to the chain from specified height, default or -1 will use the height of the chain when the wallet was created",
+		},
+		cli.Int64Flag{
+			Name:  "toHeight",
+			Usage: "Stop resyncing when this height is reached, default or -1 will use the tip of the chain",
+		},
+		cli.StringFlag{
+			Name:  "addresses",
+			Usage: "If specified, the wallet will ONLY scan the chain for these addresses, not others. If dropdb is specified then it will scan all addresses including these",
+		},
+		cli.BoolFlag{
+			Name:  "dropDB",
+			Usage: "Clean most of the data out of the wallet transaction store, this is not a real resync, it just drops the wallet and then lets it begin working again",
+		},
+	},
+	Action: actionDecorator(resync),
+}
+
+func resync(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	fh := int32(-1)
+	if ctx.IsSet("fromHeight") {
+		fh = int32(ctx.Int64("fromHeight"))
+	}
+	th := int32(-1)
+	if ctx.IsSet("toHeight") {
+		th = int32(ctx.Int64("toHeight"))
+	}
+	var a []string
+	if ctx.IsSet("addresses") {
+		a = ctx.StringSlice("addresses")
+	}
+	drop := false
+	if ctx.IsSet("dropDB") {
+		drop = ctx.Bool("dropDB")
+	}
+	req := &lnrpc.ReSyncChainRequest{
+		FromHeight: fh,
+		ToHeight:   th,
+		Addresses:  a,
+		DropDb:     drop,
+	}
+
+	resp, err := client.ReSync(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+
+	printRespJSON(resp)
+	return nil
+}
+
+var stopresyncCommand = cli.Command{
+	Name:        "stopresync",
+	Category:    "Wallet",
+	Usage:       "Stop a re-synchronization job before it's completion",
+	ArgsUsage:   "",
+	Description: `Stop a re-synchronization job before it's completion`,
+	Action:      actionDecorator(stopresync),
+}
+
+func stopresync(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	var req lnrpc.StopReSyncRequest
+
+	resp, err := client.StopReSync(ctxb, &req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var getwalletseedCommand = cli.Command{
+	Name:        "getwalletseed",
+	Category:    "Wallet",
+	Usage:       "Get the wallet seed words for this wallet",
+	ArgsUsage:   "",
+	Description: `Get the wallet seed words for this wallet`,
+	Action:      actionDecorator(getwalletseed),
+}
+
+func getwalletseed(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	req := &lnrpc.GetWalletSeedRequest{}
+
+	resp, err := client.GetWalletSeed(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var getsecretCommand = cli.Command{
+	Name:        "getsecret",
+	Category:    "Wallet",
+	Usage:       "Get a secret seed",
+	ArgsUsage:   "name",
+	Description: `Get a secret seed which is generated using the wallet's private key, this can be used as a password for another application`,
+	Action:      actionDecorator(getsecret),
+}
+
+func getsecret(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	name := ""
+	if ctx.IsSet("name") {
+		name = ctx.String("name")
+	}
+	req := &lnrpc.GetSecretRequest{
+		Name: name,
+	}
+
+	resp, err := client.GetSecret(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var importprivkeyCommand = cli.Command{
+	Name:        "importprivkey",
+	Category:    "Wallet",
+	Usage:       "Imports a WIF-encoded private key to the 'imported' account.",
+	ArgsUsage:   "'privkey' ('label' rescan=true legacy=false)",
+	Description: `Imports a WIF-encoded private key to the 'imported' account.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "privkey",
+			Usage: "The WIF-encoded private key",
+		},
+		cli.BoolFlag{
+			Name:  "rescan",
+			Usage: "Rescan the blockchain (since the genesis block) for outputs controlled by the imported key",
+		},
+		cli.BoolFlag{
+			Name:  "legacy",
+			Usage: "If true then import as a legacy address, otherwise segwit",
+		},
+	},
+	Action: actionDecorator(importprivkey),
+}
+
+func importprivkey(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	args := ctx.Args()
+	privkey := ""
+
+	if args.Present() {
+		privkey = args.First()
+		args = args.Tail()
+	} else {
+		return er.Errorf("Private key argument missing")
+	}
+
+	rescan := true
+	if ctx.IsSet("rescan") {
+		rescan = ctx.Bool("rescan")
+	}
+	legacy := false
+	if ctx.IsSet("legacy") {
+		legacy = ctx.Bool("legacy")
+	}
+	req := &lnrpc.ImportPrivKeyRequest{
+		PrivateKey: privkey,
+		Rescan:     rescan,
+		Legacy:     legacy,
+	}
+
+	resp, err := client.ImportPrivKey(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var listlockunspentCommand = cli.Command{
+	Name:        "listlockunspent",
+	Category:    "Wallet",
+	Usage:       "Returns a JSON array of outpoints marked as locked (with lockunspent) for this wallet session.",
+	ArgsUsage:   "",
+	Description: `Returns a JSON array of outpoints marked as locked (with lockunspent) for this wallet session.`,
+	Action:      actionDecorator(listLockUnspent),
+}
+
+func listLockUnspent(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	req := &lnrpc.ListLockUnspentRequest{}
+
+	resp, err := client.ListLockUnspent(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var lockunspentCommand = cli.Command{
+	Name:      "lockunspent",
+	Category:  "Wallet",
+	Usage:     "Locks or unlocks an unspent output.",
+	ArgsUsage: "unlock [{\"txid\":\"value\",\"vout\":n},...] (\"lockname\")",
+	Description: `Locks or unlocks an unspent output.
+	Locked outputs are not chosen for transaction inputs of authored transactions and are not included in 'listunspent' results.
+	Locked outputs are volatile and are not saved across wallet restarts.
+	If unlock is true and no transaction outputs are specified, all locked outputs are marked unlocked.`,
+	Flags: []cli.Flag{
+		cli.BoolFlag{
+			Name:  "unlock",
+			Usage: "unlock outputs, lock outputs",
+		},
+		cli.StringFlag{
+			Name:  "transactions",
+			Usage: "Transaction outputs to lock or unlock",
+		},
+		cli.StringFlag{
+			Name:  "lockname",
+			Usage: "Name of the lock to apply, allows groups of locks to be cleared at once",
+		},
+	},
+	Action: actionDecorator(lockUnspent),
+}
+
+func lockUnspent(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	lockname := "none"
+	unlock := true
+	inputTransactions := ""
+	args := ctx.Args()
+	if args.Present() {
+		if args.First() == "lock" {
+			unlock = false
+		}
+		args = args.Tail()
+	}
+	if args.Present() {
+		inputTransactions = args.First()
+	}
+	var transactions []*lnrpc.LockUnspentTransaction
+
+	err := json.Unmarshal([]byte(inputTransactions), &transactions)
+	if err != nil {
+		return er.E(err)
+	}
+
+	req := &lnrpc.LockUnspentRequest{
+		Unlock:       unlock,
+		Transactions: transactions,
+		Lockname:     lockname,
+	}
+
+	resp, err := client.LockUnspent(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var createtransactionCommand = cli.Command{
+	Name:        "createtransaction",
+	Category:    "Wallet",
+	Usage:       "Create a transaction but do not send it to the chain.",
+	ArgsUsage:   "\"toaddress\" amount ([\"fromaddress\",...] electrumformat \"changeaddress\" inputminheight mincon vote maxinputs autlock sign)",
+	Description: `Create a transaction but do not send it to the chain.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "toaddress",
+			Usage: "The recipient to send the coins to",
+		},
+		cli.IntFlag{
+			Name:  "amount",
+			Usage: "The amount of coins to send",
+		},
+		cli.StringSliceFlag{
+			Name:  "fromaddresses",
+			Usage: "Addresses to use for selecting coins to spend",
+		},
+		cli.BoolFlag{
+			Name:  "electrumformat",
+			Usage: "If true, then the transaction result will be output in electrum incomplete transaction format, useful for signing later",
+		},
+		cli.StringFlag{
+			Name:  "changeaddress",
+			Usage: "Return extra coins to this address, if unspecified then one will be created",
+		},
+		cli.IntFlag{
+			Name:  "inputminheight",
+			Usage: "The minimum block height to take inputs from (default: 0)",
+		},
+		cli.IntFlag{
+			Name:  "minconf",
+			Usage: "Do not spend any outputs which don't have at least this number of confirmations (default 1)",
+		},
+		cli.BoolFlag{
+			Name:  "vote",
+			Usage: "True if you wish for this transaction to contain a network steward vote",
+		},
+		cli.IntFlag{
+			Name:  "maxinputs",
+			Usage: "Maximum number of transaction inputs that are allowed",
+		},
+		cli.StringFlag{
+			Name:  "autolock",
+			Usage: "If specified, all txouts spent for this transaction will be locked under this name",
+		},
+		cli.BoolFlag{
+			Name:  "sign",
+			Usage: "True if transaction should be signed",
+		},
+	},
+	Action: actionDecorator(createTransaction),
+}
+
+func createTransaction(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	args := ctx.Args()
+	toaddress := ""
+	if len(args) > 0 {
+		toaddress = args[0]
+		if toaddress == "" {
+			return er.Errorf("To address argument missing")
+		}
+	}
+	amount := int64(0)
+	var err error
+	if len(args) > 1 {
+		amount, err = strconv.ParseInt(args[1], 10, 0)
+		if err != nil {
+			return er.Errorf("Amount argument missing")
+		}
+	}
+	var fromaddresses []string
+	if len(args) > 2 {
+		fromaddresses = strings.Split(args[2], ",")
+	}
+	electrumformat := false
+	if len(args) > 3 {
+		electrumformat, err = strconv.ParseBool(args[3])
+		if err != nil {
+			return er.Errorf("Invalid value for electrumformat")
+		}
+	}
+
+	changeaddress := ""
+	if len(args) > 4 {
+		changeaddress = args[4]
+	}
+
+	inputminheight := int64(0)
+	if len(args) > 5 {
+		inputminheight, err = strconv.ParseInt(args[5], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for inputminheight")
+		}
+	}
+	minconf := int64(0)
+	if len(args) > 6 {
+		minconf, err = strconv.ParseInt(args[6], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for minconf")
+		}
+	}
+	var vote bool
+	if len(args) > 7 {
+		vote, err = strconv.ParseBool(args[7])
+		if err != nil {
+			return er.Errorf("Invalid value for vote")
+		}
+	}
+	maxinputs := int64(0)
+	if len(args) > 8 {
+		maxinputs, err = strconv.ParseInt(args[8], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for maxinputs")
+		}
+	}
+	var autolock string
+	if len(args) > 9 {
+		autolock = args[9]
+	}
+	sign := true
+	if len(args) > 10 {
+		sign, err = strconv.ParseBool(args[10])
+		if err != nil {
+			return er.Errorf("Invalid value for sign")
+		}
+	}
+	req := &lnrpc.CreateTransactionRequest{
+		ToAddress:      toaddress,
+		Amount:         float64(amount),
+		FromAddress:    fromaddresses,
+		ElectrumFormat: electrumformat,
+		ChangeAddress:  changeaddress,
+		InputMinHeight: int32(inputminheight),
+		MinConf:        int32(minconf),
+		Vote:           vote,
+		MaxInputs:      int32(maxinputs),
+		Autolock:       autolock,
+		Sign:           sign,
+	}
+
+	resp, err := client.CreateTransaction(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var dumpprivkeyCommand = cli.Command{
+	Name:        "dumpprivkey",
+	Category:    "Wallet",
+	Usage:       "Returns the private key in WIF encoding that controls some wallet address.",
+	ArgsUsage:   "address",
+	Description: `Returns the private key in WIF encoding that controls some wallet address.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "address",
+			Usage: "The address to return a private key for",
+		},
+	},
+	Action: actionDecorator(dumpPrivKey),
+}
+
+func dumpPrivKey(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	args := ctx.Args()
+	address := ""
+	if len(args) > 0 {
+		address = args[0]
+	} else {
+		return er.Errorf("Invalid value for address")
+	}
+
+	req := &lnrpc.DumpPrivKeyRequest{
+		Address: address,
+	}
+
+	resp, err := client.DumpPrivKey(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var getnewaddressCommand = cli.Command{
+	Name:        "getnewaddress",
+	Category:    "Wallet",
+	Usage:       "Generates and returns a new payment address.",
+	ArgsUsage:   "legacy",
+	Description: `Generates and returns a new payment address.`,
+	Flags: []cli.Flag{
+		cli.BoolFlag{
+			Name:  "legacy",
+			Usage: "If true then this will create a legacy form address rather than a new segwit address",
+		},
+	},
+	Action: actionDecorator(getNewAddress),
+}
+
+func getNewAddress(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	args := ctx.Args()
+	legacy := false
+	var err error
+	if len(args) > 0 {
+		legacy, err = strconv.ParseBool(args[0])
+		if err != nil {
+			return er.Errorf("Invalid value for legacy")
+		}
+	}
+
+	req := &lnrpc.GetNewAddressRequest{
+		Legacy: legacy,
+	}
+
+	resp, err := client.GetNewAddress(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var gettransactionCommand = cli.Command{
+	Name:        "gettransaction",
+	Category:    "Wallet",
+	Usage:       "Returns a JSON object with details regarding a transaction relevant to this wallet.",
+	ArgsUsage:   "txid includewatchonly",
+	Description: `Returns a JSON object with details regarding a transaction relevant to this wallet.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "txid",
+			Usage: "Hash of the transaction to query",
+		},
+		cli.BoolFlag{
+			Name:  "includewatchonly",
+			Usage: "Also consider transactions involving watched addresses",
+		},
+	},
+	Action: actionDecorator(getTransaction),
+}
+
+func getTransaction(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	args := ctx.Args()
+	var txid string
+	includewatchonly := false
+	var err error
+	if len(args) > 0 {
+		txid = args[0]
+	} else {
+		return er.Errorf("Invalid value for txid")
+	}
+	if len(args) > 1 {
+		includewatchonly, err = strconv.ParseBool(args[1])
+		if err != nil {
+			return er.Errorf("Invalid value for includewatchonly")
+		}
+	}
+	req := &lnrpc.GetTransactionRequest{
+		Txid:             txid,
+		Includewatchonly: includewatchonly,
+	}
+
+	resp, err := client.GetTransaction(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var setNetworkStewardVoteCommand = cli.Command{
+	Name:        "setnetworkstewardvote",
+	Category:    "On-chain",
+	Usage:       "Configure the wallet to vote for a network steward when making payments (note: payments to segwit addresses cannot vote)",
+	ArgsUsage:   "voteagainst votefor",
+	Description: `Configure the wallet to vote for a network steward when making payments (note: payments to segwit addresses cannot vote)`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "voteagainst",
+			Usage: "The address to vote against (if this is the current NS then this will cause a vote for an election)",
+		},
+		cli.StringFlag{
+			Name:  "votefor",
+			Usage: "The address to vote for (in the event of an election, this is the address who should win)",
+		},
+	},
+	Action: actionDecorator(setNetworkStewardVote),
+}
+
+func setNetworkStewardVote(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	args := ctx.Args()
+	var voteagainst string
+	var votefor string
+	var err error
+	if len(args) > 0 {
+		voteagainst = args[0]
+	} else {
+		return er.Errorf("Invalid value for voteagainst")
+	}
+	if len(args) > 1 {
+		votefor = args[1]
+	} else {
+		return er.Errorf("Invalid value for votefor")
+	}
+	req := &lnrpc.SetNetworkStewardVoteRequest{
+		VoteAgainst: voteagainst,
+		VoteFor:     votefor,
+	}
+
+	resp, err := client.SetNetworkStewardVote(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var getNetworkStewardVoteCommand = cli.Command{
+	Name:        "getnetworkstewardvote",
+	Category:    "On-chain",
+	Usage:       "Find out how the wallet is currently configured to vote in a network steward election",
+	ArgsUsage:   "voteagainst votefor",
+	Description: `Find out how the wallet is currently configured to vote in a network steward election`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "voteagainst",
+			Usage: "The address which your wallet is currently voting against",
+		},
+		cli.StringFlag{
+			Name:  "votefor",
+			Usage: "The address which your wallet is currently voting for",
+		},
+	},
+	Action: actionDecorator(getNetworkStewardVote),
+}
+
+func getNetworkStewardVote(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	req := &lnrpc.GetNetworkStewardVoteRequest{}
+
+	resp, err := client.GetNetworkStewardVote(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var bcastTransactionCommand = cli.Command{
+	Name:        "bcasttransaction",
+	Category:    "On-chain",
+	Usage:       "Broadcast a transaction onchain.",
+	ArgsUsage:   "tx",
+	Description: `Broadcast a transaction onchain.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "tx",
+			Usage: "Transaction to broadcast",
+		},
+	},
+	Action: actionDecorator(bcastTransaction),
+}
+
+func bcastTransaction(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+	args := ctx.Args()
+	var tx []byte
+	var err error
+	if len(args) > 0 {
+		tx = []byte(args[0])
+	} else {
+		return er.Errorf("Invalid value for tx")
+	}
+	req := &lnrpc.BcastTransactionRequest{
+		Tx: tx,
+	}
+
+	resp, err := client.BcastTransaction(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
+	return nil
+}
+
+var sendFromCommand = cli.Command{
+	Name:        "sendfrom",
+	Category:    "Wallet",
+	Usage:       "Authors, signs, and sends a transaction that outputs some amount to a payment address.",
+	ArgsUsage:   "\"toaddress\" amount ([\"fromaddress\",...] minconf maxinputs minheight)",
+	Description: `Authors, signs, and sends a transaction that outputs some amount to a payment address.`,
+	Flags: []cli.Flag{
+		cli.StringFlag{
+			Name:  "toaddress",
+			Usage: "The recipient to send the coins to",
+		},
+		cli.IntFlag{
+			Name:  "amount",
+			Usage: "The amount of coins to send",
+		},
+		cli.StringSliceFlag{
+			Name:  "fromaddresses",
+			Usage: "Addresses to use for selecting coins to spend.",
+		},
+		cli.IntFlag{
+			Name:  "minconf",
+			Usage: "Minimum number of block confirmations required before a transaction output is eligible to be spent.",
+		},
+		cli.IntFlag{
+			Name:  "maxinputs",
+			Usage: "Maximum number of transaction inputs that are allowed.",
+		},
+		cli.IntFlag{
+			Name:  "minheight",
+			Usage: "Only select transactions from this height or above.",
+		},
+	},
+	Action: actionDecorator(sendFrom),
+}
+
+func sendFrom(ctx *cli.Context) er.R {
+	ctxb := context.Background()
+	client, cleanUp := getClient(ctx)
+	defer cleanUp()
+
+	args := ctx.Args()
+	toaddress := ""
+	if len(args) > 0 {
+		toaddress = args[0]
+		if toaddress == "" {
+			return er.Errorf("To address argument missing")
+		}
+	}
+	amount := float64(0)
+	var err error
+	if len(args) > 1 {
+		amount, err = strconv.ParseFloat(args[1], 0)
+		if err != nil {
+			return er.Errorf("Amount argument missing")
+		}
+	}
+	var fromaddresses []string
+	if len(args) > 2 {
+		fromaddresses = strings.Split(args[2], ",")
+	}
+	minconf := int64(0)
+	if len(args) > 3 {
+		minconf, err = strconv.ParseInt(args[6], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for minconf")
+		}
+	}
+	maxinputs := int64(0)
+	if len(args) > 4 {
+		maxinputs, err = strconv.ParseInt(args[8], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for maxinputs")
+		}
+	}
+	minheight := int64(0)
+	if len(args) > 5 {
+		minheight, err = strconv.ParseInt(args[5], 10, 0)
+		if err != nil {
+			return er.Errorf("Invalid value for minheight")
+		}
+	}
+	req := &lnrpc.SendFromRequest{
+		ToAddress:   toaddress,
+		Amount:      amount,
+		FromAddress: fromaddresses,
+		MinHeight:   int32(minheight),
+		MinConf:     int32(minconf),
+		MaxInputs:   int32(maxinputs),
+	}
+
+	resp, err := client.SendFrom(ctxb, req)
+	if err != nil {
+		return er.E(err)
+	}
+	printRespJSON(resp)
 	return nil
 }

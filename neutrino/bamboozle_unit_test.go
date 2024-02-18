@@ -556,29 +556,41 @@ func runCheckCFCheckptSanityTestCase(t *testing.T, testCase *cfCheckptTestCase) 
 	}
 	defer db.Close()
 
-	hdrStore, err := headerfs.NewBlockHeaderStore(
+	//hdrStore, err := headerfs.NewBlockHeaderStore(
+	//	db, &chaincfg.SimNetParams,
+	//)
+	hdrStore, err := headerfs.NewNeutrinoDBStore(
 		db, &chaincfg.SimNetParams,
+		true,
 	)
 	if err != nil {
 		t.Fatalf("Error creating block header store: %s", err)
 	}
 
-	cfStore, err := headerfs.NewFilterHeaderStore(db, &chaincfg.SimNetParams, nil, nil)
-	if err != nil {
-		t.Fatalf("Error creating filter header store: %s", err)
-	}
+	//cfStore, err := headerfs.NewFilterHeaderStore(db, &chaincfg.SimNetParams, nil, nil)
+	//if err != nil {
+	//	t.Fatalf("Error creating filter header store: %s", err)
+	//}
+	cfStore := hdrStore
 
 	walletdb.Update(db, func(tx walletdb.ReadWriteTx) er.R {
 		runCheckCFCheckptSanityTestCase1(t, testCase, tx, cfStore, hdrStore)
 		return nil
 	})
 }
+
+//func runCheckCFCheckptSanityTestCase1(
+//	t *testing.T,
+//	testCase *cfCheckptTestCase,
+//	tx walletdb.ReadWriteTx,
+//	cfStore *headerfs.FilterHeaderStore,
+//	hdrStore headerfs.BlockHeaderStore,
 func runCheckCFCheckptSanityTestCase1(
 	t *testing.T,
 	testCase *cfCheckptTestCase,
 	tx walletdb.ReadWriteTx,
-	cfStore *headerfs.FilterHeaderStore,
-	hdrStore headerfs.BlockHeaderStore,
+	cfStore *headerfs.NeutrinoDBStore,
+	hdrStore *headerfs.NeutrinoDBStore,
 ) {
 	var (
 		height uint32
@@ -619,11 +631,13 @@ func runCheckCFCheckptSanityTestCase1(
 			Height:     height,
 		})
 
-		if err = hdrStore.WriteHeaders(tx, hdrBatch...); err != nil {
+		//if err = hdrStore.WriteHeaders(tx, hdrBatch...); err != nil {
+		if err = hdrStore.WriteBlockHeaders(tx, hdrBatch...); err != nil {
 			t.Fatalf("Error writing batch of headers: %s", err)
 		}
 
-		if err = cfStore.WriteHeaders(tx, cfBatch...); err != nil {
+		//if err = cfStore.WriteHeaders(tx, cfBatch...); err != nil {
+		if err = cfStore.WriteFilterHeaders(tx, cfBatch...); err != nil {
 			t.Fatalf("Error writing batch of cfheaders: %s", err)
 		}
 	}
@@ -633,14 +647,20 @@ func runCheckCFCheckptSanityTestCase1(
 			wire.CFCheckptInterval + i)
 		header = heightToHeader(height)
 
-		if err = hdrStore.WriteHeaders(tx, headerfs.BlockHeader{
+		//if err = hdrStore.WriteHeaders(tx, headerfs.BlockHeader{
+		if err = hdrStore.WriteBlockHeaders(tx, headerfs.BlockHeader{
 			BlockHeader: header,
 			Height:      height,
 		}); err != nil {
 			t.Fatalf("Error writing single block header: %s", err)
 		}
 
-		if err = cfStore.WriteHeaders(tx, headerfs.FilterHeader{
+		//if err = cfStore.WriteHeaders(tx, headerfs.FilterHeader{
+		//	FilterHash: zeroHash,
+		//	HeaderHash: zeroHash,
+		//	Height:     height,
+		//}); err != nil {
+		if err = cfStore.WriteFilterHeaders(tx, headerfs.FilterHeader{
 			FilterHash: zeroHash,
 			HeaderHash: zeroHash,
 			Height:     height,
@@ -649,7 +669,7 @@ func runCheckCFCheckptSanityTestCase1(
 		}
 	}
 
-	heightDiff, err := checkCFCheckptSanity(testCase.checkpoints, cfStore)
+	heightDiff, err := checkCFCheckptSanity(testCase.checkpoints, *cfStore)
 	if err != nil {
 		t.Fatalf("Error from checkCFCheckptSanity: %s", err)
 	}

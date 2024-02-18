@@ -4,12 +4,8 @@
 package verrpc
 
 import (
-	context "context"
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	grpc "google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	status "google.golang.org/grpc/status"
 	math "math"
 )
 
@@ -195,90 +191,4 @@ var fileDescriptor_494312204cefa0e6 = []byte{
 	0xe1, 0x5d, 0x1e, 0x17, 0xa2, 0x49, 0xe4, 0x97, 0xb9, 0x2b, 0xa8, 0xe6, 0x56, 0x6c, 0x93, 0xba,
 	0xb5, 0xdf, 0x7e, 0x59, 0x79, 0xe0, 0xb6, 0xf5, 0xf0, 0x1b, 0x00, 0x00, 0xff, 0xff, 0x17, 0xf2,
 	0x96, 0x3c, 0xc4, 0x01, 0x00, 0x00,
-}
-
-// Reference imports to suppress errors if they are not otherwise used.
-var _ context.Context
-var _ grpc.ClientConn
-
-// This is a compile-time assertion to ensure that this generated file
-// is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion4
-
-// VersionerClient is the client API for Versioner service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type VersionerClient interface {
-	// lncli: `version`
-	//GetVersion returns the current version and build information of the running
-	//daemon.
-	GetVersion(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*Version, error)
-}
-
-type versionerClient struct {
-	cc *grpc.ClientConn
-}
-
-func NewVersionerClient(cc *grpc.ClientConn) VersionerClient {
-	return &versionerClient{cc}
-}
-
-func (c *versionerClient) GetVersion(ctx context.Context, in *VersionRequest, opts ...grpc.CallOption) (*Version, error) {
-	out := new(Version)
-	err := c.cc.Invoke(ctx, "/verrpc.Versioner/GetVersion", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// VersionerServer is the server API for Versioner service.
-type VersionerServer interface {
-	// lncli: `version`
-	//GetVersion returns the current version and build information of the running
-	//daemon.
-	GetVersion(context.Context, *VersionRequest) (*Version, error)
-}
-
-// UnimplementedVersionerServer can be embedded to have forward compatible implementations.
-type UnimplementedVersionerServer struct {
-}
-
-func (*UnimplementedVersionerServer) GetVersion(ctx context.Context, req *VersionRequest) (*Version, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetVersion not implemented")
-}
-
-func RegisterVersionerServer(s *grpc.Server, srv VersionerServer) {
-	s.RegisterService(&_Versioner_serviceDesc, srv)
-}
-
-func _Versioner_GetVersion_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VersionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(VersionerServer).GetVersion(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/verrpc.Versioner/GetVersion",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VersionerServer).GetVersion(ctx, req.(*VersionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-var _Versioner_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "verrpc.Versioner",
-	HandlerType: (*VersionerServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetVersion",
-			Handler:    _Versioner_GetVersion_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "verrpc/verrpc.proto",
 }

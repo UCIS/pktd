@@ -112,7 +112,7 @@ func testHtlcErrorPropagation(net *lntest.NetworkHarness, t *harnessTest) {
 
 	// Ensure that Alice has Carol in her routing table before proceeding.
 	nodeInfoReq := &lnrpc.NodeInfoRequest{
-		PubKey: carol.PubKeyStr,
+		PubKey: carol.PubKey[:],
 	}
 	checkTableTimeout := time.After(time.Second * 10)
 	checkTableTicker := time.NewTicker(100 * time.Millisecond)

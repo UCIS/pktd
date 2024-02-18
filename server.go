@@ -31,6 +31,7 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/connmgr"
+	"github.com/pkt-cash/pktd/connmgr/banmgr"
 	"github.com/pkt-cash/pktd/database"
 	"github.com/pkt-cash/pktd/mempool"
 	"github.com/pkt-cash/pktd/mining"
@@ -201,6 +202,7 @@ type server struct {
 	db                   database.DB
 	timeSource           blockchain.MedianTimeSource
 	services             protocol.ServiceFlag
+	banMgr               banmgr.BanMgr
 
 	// The following fields are used for optional indexes.  They will be nil
 	// if the associated index is not enabled.  These fields are set during
@@ -247,7 +249,7 @@ type serverPeer struct {
 	filter         *bloom.Filter
 	addressesMtx   sync.RWMutex
 	knownAddresses map[string]struct{}
-	banScore       connmgr.DynamicBanScore
+	banScore       *banmgr.DynamicBanScore
 	quit           chan struct{}
 	// The following chans are used to sync blockmanager and server.
 	txProcessed    chan struct{}
@@ -338,36 +340,9 @@ func (sp *serverPeer) pushAddrMsg(addresses []*wire.NetAddress) {
 // the score is above the ban threshold, the peer will be banned and
 // disconnected.
 func (sp *serverPeer) addBanScore(persistent, transient uint32, reason string) {
-	// No warning is logged and no score is calculated if banning is disabled.
-	if cfg.DisableBanning {
-		return
-	}
-	if sp.isWhitelisted {
-		log.Debugf("Misbehaving whitelisted peer %s: %s", sp, reason)
-		return
-	}
-
-	warnThreshold := cfg.BanThreshold >> 1
-	if transient == 0 && persistent == 0 {
-		// The score is not being increased, but a warning message is still
-		// logged if the score is above the warn threshold.
-		score := sp.banScore.Int()
-		if score > warnThreshold {
-			log.Warnf("Misbehaving peer %s: %s -- ban score is %d, "+
-				"it was not increased this time", sp, reason, score)
-		}
-		return
-	}
-	score := sp.banScore.Increase(persistent, transient)
-	if score > warnThreshold {
-		log.Warnf("Misbehaving peer %s: %s -- ban score increased to %d",
-			sp, reason, score)
-		if score > cfg.BanThreshold {
-			log.Warnf("Misbehaving peer %s -- banning and disconnecting",
-				sp)
-			sp.server.BanPeer(sp)
-			sp.Disconnect()
-		}
+	if sp.server.banMgr.AddBanScore(sp.Addr(), persistent, transient, reason) {
+		sp.server.BanPeer(sp)
+		sp.Disconnect()
 	}
 }
 
@@ -745,8 +720,10 @@ func (sp *serverPeer) OnGetHeaders(_ *peer.Peer, msg *wire.MsgGetHeaders) {
 
 // OnGetCFilters is invoked when a peer receives a getcfilters bitcoin message.
 func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
-	// Ignore getcfilters requests if not in sync.
-	if !sp.server.syncManager.IsCurrent() {
+	// Ignore getcfilters requests if we don't have the necessary blocks yet
+	if _, err := sp.server.chain.BlockByHash(&msg.StopHash); err != nil {
+		log.Infof("Not serving filter %v to peer %v because we are not synced",
+			msg.FilterType, sp.String())
 		return
 	}
 
@@ -757,8 +734,8 @@ func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
 		break
 
 	default:
-		log.Debugf("Filter request for unknown filter: %v",
-			msg.FilterType)
+		log.Infof("Filter request for unknown filter: %v from %v",
+			msg.FilterType, sp.String())
 		return
 	}
 
@@ -766,7 +743,7 @@ func (sp *serverPeer) OnGetCFilters(_ *peer.Peer, msg *wire.MsgGetCFilters) {
 		int32(msg.StartHeight), &msg.StopHash, wire.MaxGetCFiltersReqRange,
 	)
 	if err != nil {
-		log.Debugf("Invalid getcfilters request: %v", err)
+		log.Infof("Invalid getcfilters request from [%v]: %v", sp.String(), err)
 		return
 	}
 
@@ -1587,6 +1564,9 @@ func (s *server) handleAddPeerMsg(state *peerState, sp *serverPeer) bool {
 	}
 
 	// TODO: Check for max peers from a single IP.
+
+	// Rapid reconnect
+	sp.addBanScore(0, 10, "connect")
 
 	// Limit max number of total peers.
 	if state.Count() >= cfg.MaxPeers {
@@ -2574,7 +2554,11 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 	if len(agentWhitelist) > 0 {
 		log.Infof("User-agent whitelist %s", agentWhitelist)
 	}
-
+	bmConfig := banmgr.Config{
+		DisableBanning: cfg.DisableBanning,
+		IpWhiteList:    []string{},
+		BanThreashold:  cfg.BanThreshold,
+	}
 	s := server{
 		startupTime:          time.Now().Unix(),
 		chainParams:          chainParams,
@@ -2597,6 +2581,7 @@ func newServer(listenAddrs, agentBlacklist, agentWhitelist []string,
 		cfCheckptCaches:      make(map[wire.FilterType][]cfHeaderKV),
 		agentBlacklist:       agentBlacklist,
 		agentWhitelist:       agentWhitelist,
+		banMgr:               *banmgr.New(&bmConfig),
 	}
 
 	// Create the transaction and address indexes if needed.

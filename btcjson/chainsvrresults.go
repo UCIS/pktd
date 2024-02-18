@@ -53,6 +53,7 @@ type GetBlockVerboseResult struct {
 	PcpHex              string        `json:"packetcryptproof,omitempty"`
 	PcpVersion          *int          `json:"packetcryptversion,omitempty"`
 	PcAnnCount          *uint64       `json:"packetcryptanncount,omitempty"`
+	PcOrigAnnWork       *[]int32      `json:"packetcryptorigannwork,omitempty"`
 	PcAnnBits           string        `json:"packetcryptannbits,omitempty"`
 	PcAnnDifficulty     *float64      `json:"packetcryptanndifficulty,omitempty"`
 	PcBlkDifficulty     *float64      `json:"packetcryptblkdifficulty,omitempty"`
@@ -236,9 +237,9 @@ type GetPeerInfoResult struct {
 }
 
 type GetNetworkInfoNetworks struct {
-	Name                      string `json:"name"`
-	Limited                   bool   `json:"limited"`
-	Reachable                 bool   `json:"reachable"`
+	Name      string `json:"name"`
+	Limited   bool   `json:"limited"`
+	Reachable bool   `json:"reachable"`
 }
 
 type GetNetworkInfoResult struct {

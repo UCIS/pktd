@@ -600,6 +600,10 @@ func (b *bogusAddress) String() string {
 	return ""
 }
 
+func (b *bogusAddress) IsSegwit() bool {
+	return false
+}
+
 // TestPayToAddrScript ensures the PayToAddrScript function generates the
 // correct scripts for the various types of addresses.
 func TestPayToAddrScript(t *testing.T) {

@@ -4,12 +4,8 @@
 package watchtowerrpc
 
 import (
-	context "context"
 	fmt "fmt"
 	proto "github.com/golang/protobuf/proto"
-	grpc "google.golang.org/grpc"
-	codes "google.golang.org/grpc/codes"
-	status "google.golang.org/grpc/status"
 	math "math"
 )
 
@@ -135,92 +131,4 @@ var fileDescriptor_9f019c0e859ad3d6 = []byte{
 	0x49, 0x2f, 0x39, 0x3f, 0x57, 0xbf, 0x20, 0xbb, 0x44, 0x37, 0x39, 0xb1, 0x38, 0x03, 0xc4, 0x48,
 	0xd1, 0xcf, 0xc9, 0x03, 0x61, 0xd4, 0xc0, 0x28, 0x2a, 0x48, 0x4e, 0x62, 0x03, 0x07, 0x88, 0x31,
 	0x20, 0x00, 0x00, 0xff, 0xff, 0xc8, 0x28, 0x83, 0x0d, 0x32, 0x01, 0x00, 0x00,
-}
-
-// Reference imports to suppress errors if they are not otherwise used.
-var _ context.Context
-var _ grpc.ClientConn
-
-// This is a compile-time assertion to ensure that this generated file
-// is compatible with the grpc package it is being compiled against.
-const _ = grpc.SupportPackageIsVersion4
-
-// WatchtowerClient is the client API for Watchtower service.
-//
-// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type WatchtowerClient interface {
-	// lncli: tower info
-	//GetInfo returns general information concerning the companion watchtower
-	//including its public key and URIs where the server is currently
-	//listening for clients.
-	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
-}
-
-type watchtowerClient struct {
-	cc *grpc.ClientConn
-}
-
-func NewWatchtowerClient(cc *grpc.ClientConn) WatchtowerClient {
-	return &watchtowerClient{cc}
-}
-
-func (c *watchtowerClient) GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error) {
-	out := new(GetInfoResponse)
-	err := c.cc.Invoke(ctx, "/watchtowerrpc.Watchtower/GetInfo", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// WatchtowerServer is the server API for Watchtower service.
-type WatchtowerServer interface {
-	// lncli: tower info
-	//GetInfo returns general information concerning the companion watchtower
-	//including its public key and URIs where the server is currently
-	//listening for clients.
-	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
-}
-
-// UnimplementedWatchtowerServer can be embedded to have forward compatible implementations.
-type UnimplementedWatchtowerServer struct {
-}
-
-func (*UnimplementedWatchtowerServer) GetInfo(ctx context.Context, req *GetInfoRequest) (*GetInfoResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method GetInfo not implemented")
-}
-
-func RegisterWatchtowerServer(s *grpc.Server, srv WatchtowerServer) {
-	s.RegisterService(&_Watchtower_serviceDesc, srv)
-}
-
-func _Watchtower_GetInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetInfoRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(WatchtowerServer).GetInfo(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/watchtowerrpc.Watchtower/GetInfo",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(WatchtowerServer).GetInfo(ctx, req.(*GetInfoRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-var _Watchtower_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "watchtowerrpc.Watchtower",
-	HandlerType: (*WatchtowerServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "GetInfo",
-			Handler:    _Watchtower_GetInfo_Handler,
-		},
-	},
-	Streams:  []grpc.StreamDesc{},
-	Metadata: "watchtowerrpc/watchtower.proto",
 }

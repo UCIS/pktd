@@ -2,6 +2,7 @@ package txsizes_test
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
@@ -9,6 +10,8 @@ import (
 
 	. "github.com/pkt-cash/pktd/pktwallet/wallet/internal/txsizes"
 	"github.com/pkt-cash/pktd/wire"
+
+	h "github.com/pkt-cash/pktd/pktwallet/internal/helpers"
 )
 
 const (
@@ -137,7 +140,10 @@ func TestEstimateVirtualSize(t *testing.T) {
 			},
 			p2wpkhIns: 1,
 			change:    true,
-			result:    144,
+			//	baseSize = 8 + 1 + 1 + 0 + 1*41 + 0 + 34 + 34
+			//	witnessWeight = 2 + 1 + 1*109
+			//	expected result = baseSize + ( witnessWeght + 3 ) / 4
+			result: 147,
 		},
 		{
 			// Spending one P2PKH to two P2PKH outputs (no witness data).
@@ -165,6 +171,10 @@ func TestEstimateVirtualSize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unable to get test tx: %v", err)
 		}
+
+		//	[aldebap] I don't know why log is not generating outputs for this test
+		//	log.Debugf(">>>>> [debug] SumOutputSerializeSizes(tx.TxOut): %d", h.SumOutputSerializeSizes(tx.TxOut))
+		fmt.Printf(">>>>> [debug] SumOutputSerializeSizes(tx.TxOut): %d\n", h.SumOutputSerializeSizes(tx.TxOut))
 
 		est := EstimateVirtualSize(test.p2pkhIns, test.p2wpkhIns,
 			test.nestedp2wpkhIns, tx.TxOut, test.change)

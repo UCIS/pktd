@@ -7,9 +7,9 @@ package lnclipb;
 option go_package = "github.com/pkt-cash/pktd/lnd/lnrpc/lnclipb";
 
 message VersionResponse {
-    // The version information for lncli.
-    verrpc.Version lncli = 1;
+    // The version information for pldctl.
+    verrpc.Version pldctl = 1;
 
-    // The version information for lnd.
-    verrpc.Version lnd = 2;
+    // The version information for pld.
+    verrpc.Version pld = 2;
 };

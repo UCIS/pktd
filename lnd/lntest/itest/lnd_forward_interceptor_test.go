@@ -289,7 +289,7 @@ func (c *interceptorTestContext) prepareTestCases() (
 			return nil, er.Errorf("unable to add invoice: %v", err)
 		}
 		invoice, err := c.carol.LookupInvoice(context.Background(), &lnrpc.PaymentHash{
-			RHashStr: hex.EncodeToString(addResponse.RHash),
+			RHash: addResponse.RHash,
 		})
 		if err != nil {
 			return nil, er.Errorf("unable to add invoice: %v", err)

@@ -2,7 +2,8 @@
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
 
-//+build !generate
+//go:build !generate
+// +build !generate
 
 package rpchelp
 
@@ -52,6 +53,7 @@ var Methods = []struct {
 	{"sendfrom", returnsString},
 	{"sendmany", returnsString},
 	{"sendtoaddress", returnsString},
+	{"sendvote", returnsString},
 	{"settxfee", returnsBool},
 	{"signmessage", returnsString},
 	{"signrawtransaction", []interface{}{(*btcjson.SignRawTransactionResult)(nil)}},

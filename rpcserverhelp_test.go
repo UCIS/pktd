@@ -4,7 +4,11 @@
 
 package main
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/pkt-cash/pktd/pktlog/log"
+)
 
 // TestHelp ensures the help is reasonably accurate by checking that every
 // command specified also has result types defined and the one-line usage and
@@ -39,6 +43,8 @@ func TestHelp(t *testing.T) {
 
 	// Ensure the help for every command can be generated without errors.
 	for k := range rpcHandlers {
+		log.Debugf(">>>>> [debug.1] check help method: %s", k)
+
 		if _, err := helpCacher.rpcMethodHelp(k); err != nil {
 			t.Errorf("Failed to generate help for method '%v': %v",
 				k, err)

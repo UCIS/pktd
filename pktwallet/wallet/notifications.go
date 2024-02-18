@@ -15,6 +15,7 @@ import (
 	"github.com/pkt-cash/pktd/pktwallet/waddrmgr"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
 	"github.com/pkt-cash/pktd/pktwallet/wtxmgr"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
 	"github.com/pkt-cash/pktd/txscript"
 )
 
@@ -150,36 +151,13 @@ func makeTxSummary(dbtx walletdb.ReadTx, w *Wallet, details *wtxmgr.TxDetails) T
 	}
 }
 
-func totalBalances(dbtx walletdb.ReadTx, w *Wallet, m map[uint32]btcutil.Amount) er.R {
-	addrmgrNs := dbtx.ReadBucket(waddrmgrNamespaceKey)
-	unspent, err := w.TxStore.GetUnspentOutputs(dbtx.ReadBucket(wtxmgrNamespaceKey))
-	if err != nil {
-		return err
-	}
-	for i := range unspent {
-		output := &unspent[i]
-		var outputAcct uint32
-		_, addrs, _, err := txscript.ExtractPkScriptAddrs(
-			output.PkScript, w.chainParams)
-		if err == nil && len(addrs) > 0 {
-			_, outputAcct, err = w.Manager.AddrAccount(addrmgrNs, addrs[0])
-		}
-		if err == nil {
-			_, ok := m[outputAcct]
-			if ok {
-				m[outputAcct] += output.Amount
-			}
-		}
-	}
-	return nil
-}
-
-func flattenBalanceMap(m map[uint32]btcutil.Amount) []AccountBalance {
-	s := make([]AccountBalance, 0, len(m))
-	for k, v := range m {
-		s = append(s, AccountBalance{Account: k, TotalBalance: v})
-	}
-	return s
+func totalBalances(dbtx walletdb.ReadTx, w *Wallet, m map[string]btcutil.Amount) er.R {
+	ns := dbtx.ReadBucket(wtxmgrNamespaceKey)
+	_, err := w.TxStore.ForEachUnspentOutput(ns, nil, nil, func(_ []byte, uns *dbstructs.Unspent) er.R {
+		m[uns.Address] += btcutil.Amount(uns.Value)
+		return nil
+	})
+	return err
 }
 
 func relevantAccounts(w *Wallet, m map[uint32]btcutil.Amount, txs []TransactionSummary) {
@@ -214,8 +192,7 @@ func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, deta
 		log.Errorf("Cannot fetch unmined transaction hashes: %v", err)
 		return
 	}
-	bals := make(map[uint32]btcutil.Amount)
-	relevantAccounts(s.wallet, bals, unminedTxs)
+	bals := make(map[string]btcutil.Amount)
 	err = totalBalances(dbtx, s.wallet, bals)
 	if err != nil {
 		log.Errorf("Cannot determine balances for relevant accounts: %v", err)
@@ -224,7 +201,7 @@ func (s *NotificationServer) notifyUnminedTransaction(dbtx walletdb.ReadTx, deta
 	n := &TransactionNotifications{
 		UnminedTransactions:      unminedTxs,
 		UnminedTransactionHashes: unminedHashes,
-		NewBalances:              flattenBalanceMap(bals),
+		NewBalances:              bals,
 	}
 	for _, c := range clients {
 		c <- n
@@ -303,16 +280,13 @@ func (s *NotificationServer) notifyAttachedBlock(dbtx walletdb.ReadTx, block *wt
 	}
 	s.currentTxNtfn.UnminedTransactionHashes = unminedHashes
 
-	bals := make(map[uint32]btcutil.Amount)
-	for _, b := range s.currentTxNtfn.AttachedBlocks {
-		relevantAccounts(s.wallet, bals, b.Transactions)
-	}
+	bals := make(map[string]btcutil.Amount)
 	err = totalBalances(dbtx, s.wallet, bals)
 	if err != nil {
 		log.Errorf("Cannot determine balances for relevant accounts: %v", err)
 		return
 	}
-	s.currentTxNtfn.NewBalances = flattenBalanceMap(bals)
+	s.currentTxNtfn.NewBalances = bals
 
 	for _, c := range clients {
 		c <- s.currentTxNtfn
@@ -343,7 +317,7 @@ type TransactionNotifications struct {
 	DetachedBlocks           []*chainhash.Hash
 	UnminedTransactions      []TransactionSummary
 	UnminedTransactionHashes []*chainhash.Hash
-	NewBalances              []AccountBalance
+	NewBalances              map[string]btcutil.Amount
 }
 
 // Block contains the properties and all relevant transactions of an attached
@@ -384,15 +358,6 @@ type TransactionSummaryOutput struct {
 	Index    uint32
 	Account  uint32
 	Internal bool
-}
-
-// AccountBalance associates a total (zero confirmation) balance with an
-// account.  Balances for other minimum confirmation counts require more
-// expensive logic and it is not clear which minimums a client is interested in,
-// so they are not included.
-type AccountBalance struct {
-	Account      uint32
-	TotalBalance btcutil.Amount
 }
 
 // TransactionNotificationsClient receives TransactionNotifications from the

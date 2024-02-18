@@ -13,7 +13,7 @@ import (
 
 // defaultDBTimeout specifies the timeout value when opening the wallet
 // database.
-var defaultDBTimeout = 10 * time.Second
+var defaultDBTimeout = 10 * time.Second //nolint:unused
 
 // testWallet creates a test wallet and unlocks it.
 func testWallet(t *testing.T) (*Wallet, func()) {

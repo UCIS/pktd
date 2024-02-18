@@ -216,7 +216,11 @@ func (i *InvoiceRegistry) scanInvoicesOnStart() er.R {
 	i.expiryWatcher.AddInvoices(pending...)
 
 	if err := i.cdb.DeleteInvoice(removable); err != nil {
-		log.Warnf("Deleting old invoices failed: %v", err)
+		if !channeldb.ErrNoInvoicesCreated.Is(err) {
+			log.Warnf("Deleting old invoices failed: %v", err)
+		} else {
+			log.Debug("Deleting old invoices: No invoices to delete")
+		}
 	}
 
 	return nil

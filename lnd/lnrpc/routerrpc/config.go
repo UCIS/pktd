@@ -16,7 +16,10 @@ type Config struct {
 	// RouterMacPath is the path for the router macaroon. If unspecified
 	// then we assume that the macaroon will be found under the network
 	// directory, named DefaultRouterMacFilename.
-	RouterMacPath string `long:"routermacaroonpath" description:"Path to the router macaroon"`
+
+	//	we want to disable the use of macaroons just for the users so,
+	//	no more CLI options, config ini options or help for the following Config field
+	RouterMacPath string
 
 	// NetworkDir is the main network directory wherein the router rpc
 	// server will find the macaroon named DefaultRouterMacFilename.

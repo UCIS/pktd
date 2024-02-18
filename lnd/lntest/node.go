@@ -322,6 +322,8 @@ type HarnessNode struct {
 
 	lnrpc.WalletUnlockerClient
 
+	lnrpc.MetaServiceClient
+
 	invoicesrpc.InvoicesClient
 
 	// SignerClient cannot be embedded because the name collisions of the
@@ -339,9 +341,10 @@ type HarnessNode struct {
 	WatchtowerClient wtclientrpc.WatchtowerClientClient
 }
 
-// Assert *HarnessNode implements the lnrpc.LightningClient interface.
+// Assert *HarnessNode implements all 4 interfaces it declares
 var _ lnrpc.LightningClient = (*HarnessNode)(nil)
 var _ lnrpc.WalletUnlockerClient = (*HarnessNode)(nil)
+var _ lnrpc.MetaServiceClient = (*HarnessNode)(nil)
 var _ invoicesrpc.InvoicesClient = (*HarnessNode)(nil)
 
 // newNode creates a new test lightning node instance from the passed config.
@@ -659,21 +662,10 @@ func (hn *HarnessNode) Init(ctx context.Context,
 	// it via a macaroon-authenticated rpc connection.
 	var conn *grpc.ClientConn
 	if err := wait.Predicate(func() bool {
-		// If the node has been initialized stateless, we need to pass
-		// the macaroon to the client.
-		var err er.R
-		if initReq.StatelessInit {
-			adminMac := &macaroon.Macaroon{}
-			errr := adminMac.UnmarshalBinary(response.AdminMacaroon)
-			if errr != nil {
-				return false
-			}
-			conn, err = hn.ConnectRPCWithMacaroon(adminMac)
-			return err == nil
-		}
-
 		// Normal initialization, we expect a macaroon to be in the
 		// file system.
+		var err er.R
+
 		conn, err = hn.ConnectRPC(true)
 		return err == nil
 	}, DefaultTimeout); err != nil {
@@ -703,21 +695,10 @@ func (hn *HarnessNode) InitChangePassword(ctx context.Context,
 	// it via a macaroon-authenticated rpc connection.
 	var conn *grpc.ClientConn
 	if err := wait.Predicate(func() bool {
-		// If the node has been initialized stateless, we need to pass
-		// the macaroon to the client.
-		var err er.R
-		if chngPwReq.StatelessInit {
-			adminMac := &macaroon.Macaroon{}
-			errr := adminMac.UnmarshalBinary(response.AdminMacaroon)
-			if errr != nil {
-				return false
-			}
-			conn, err = hn.ConnectRPCWithMacaroon(adminMac)
-			return err == nil
-		}
-
 		// Normal initialization, we expect a macaroon to be in the
 		// file system.
+		var err er.R
+
 		conn, err = hn.ConnectRPC(true)
 		return err == nil
 	}, DefaultTimeout); err != nil {
@@ -824,9 +805,9 @@ func (hn *HarnessNode) FetchNodeInfo() er.R {
 		return er.E(errr)
 	}
 
-	hn.PubKeyStr = info.IdentityPubkey
+	hn.PubKeyStr = string(info.IdentityPubkey)
 
-	pubkey, err := util.DecodeHex(info.IdentityPubkey)
+	pubkey, err := util.DecodeHex(string(info.IdentityPubkey))
 	if err != nil {
 		return err
 	}

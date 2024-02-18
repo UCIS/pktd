@@ -9,15 +9,12 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/neutrino/cache"
 	"github.com/pkt-cash/pktd/neutrino/cache/lru"
-	"github.com/pkt-cash/pktd/neutrino/filterdb"
 	"github.com/pkt-cash/pktd/wire"
 )
 
 // TestBlockFilterCaches tests that we can put and retrieve elements from all
 // implementations of the filter and block caches.
 func TestBlockFilterCaches(t *testing.T) {
-
-	const filterType = filterdb.RegularFilter
 
 	// Create a cache large enough to not evict any item. We do this so we
 	// don't have to worry about the eviction strategy of the tested
@@ -54,7 +51,7 @@ func TestBlockFilterCaches(t *testing.T) {
 		filters = append(filters, filter)
 
 		// Put the generated filter in the filter caches.
-		cacheKey := cache.FilterCacheKey{blockHash, filterType}
+		cacheKey := cache.FilterCacheKey{blockHash}
 		for _, c := range filterCaches {
 			c.Put(cacheKey, &cache.CacheableFilter{Filter: filter})
 		}
@@ -77,7 +74,7 @@ func TestBlockFilterCaches(t *testing.T) {
 	// retrieve all elements from the caches.
 	for i, blockHash := range blockHashes {
 		// Check filter caches.
-		cacheKey := cache.FilterCacheKey{blockHash, filterType}
+		cacheKey := cache.FilterCacheKey{blockHash}
 		for _, c := range filterCaches {
 			e, err := c.Get(cacheKey)
 			if err != nil {

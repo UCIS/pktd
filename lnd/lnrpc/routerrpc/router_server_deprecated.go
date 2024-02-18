@@ -51,7 +51,7 @@ func (i *legacyTrackPaymentServer) Send(p *lnrpc.Payment) error {
 		return er.Native(er.Errorf("unknown state %v", p.Status))
 	}
 
-	preimage, err := util.DecodeHex(p.PaymentPreimage)
+	preimage, err := util.DecodeHex(string(p.PaymentPreimage))
 	if err != nil {
 		return er.Native(err)
 	}

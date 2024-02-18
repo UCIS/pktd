@@ -22,7 +22,6 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg/genesis"
 	"github.com/pkt-cash/pktd/neutrino/cache"
 	"github.com/pkt-cash/pktd/neutrino/cache/lru"
-	"github.com/pkt-cash/pktd/neutrino/filterdb"
 )
 
 var (
@@ -167,7 +166,7 @@ func genRandFilter(numElements uint32, t *testing.T) (
 // getFilter is a convenience method which will extract a value from the cache
 // and handle errors, it makes the test code easier to follow.
 func getFilter(cs *ChainService, b *chainhash.Hash, t *testing.T) *gcs.Filter {
-	val, err := cs.getFilterFromCache(b, filterdb.RegularFilter)
+	val, err := cs.getFilterFromCache(b)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,11 +197,11 @@ func TestCacheBigEnoughHoldsAllFilter(t *testing.T) {
 
 	// Insert those filters into the cache making sure nothing gets evicted.
 	assertEqual(t, cs.FilterCache.Len(), 0, "")
-	cs.putFilterToCache(b1, filterdb.RegularFilter, f1)
+	cs.putFilterToCache(b1, f1)
 	assertEqual(t, cs.FilterCache.Len(), 1, "")
-	cs.putFilterToCache(b2, filterdb.RegularFilter, f2)
+	cs.putFilterToCache(b2, f2)
 	assertEqual(t, cs.FilterCache.Len(), 2, "")
-	cs.putFilterToCache(b3, filterdb.RegularFilter, f3)
+	cs.putFilterToCache(b3, f3)
 	assertEqual(t, cs.FilterCache.Len(), 3, "")
 
 	// Check that we can get those filters back independent of Get order.
@@ -232,13 +231,13 @@ func TestBigFilterEvictsEverything(t *testing.T) {
 
 	// Insert the smaller filters.
 	assertEqual(t, cs.FilterCache.Len(), 0, "")
-	cs.putFilterToCache(b1, filterdb.RegularFilter, f1)
+	cs.putFilterToCache(b1, f1)
 	assertEqual(t, cs.FilterCache.Len(), 1, "")
-	cs.putFilterToCache(b2, filterdb.RegularFilter, f2)
+	cs.putFilterToCache(b2, f2)
 	assertEqual(t, cs.FilterCache.Len(), 2, "")
 
 	// Insert the big filter and check all previous filters are evicted.
-	cs.putFilterToCache(b3, filterdb.RegularFilter, f3)
+	cs.putFilterToCache(b3, f3)
 	assertEqual(t, cs.FilterCache.Len(), 1, "")
 	assertEqual(t, getFilter(cs, b3, t), f3, "")
 }

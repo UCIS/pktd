@@ -18,7 +18,6 @@ import (
 	"github.com/pkt-cash/pktd/btcutil/gcs/builder"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/neutrino/cache"
-	"github.com/pkt-cash/pktd/neutrino/filterdb"
 	"github.com/pkt-cash/pktd/neutrino/pushtx"
 	"github.com/pkt-cash/pktd/wire"
 )
@@ -92,12 +91,6 @@ type queryOptions struct {
 	// doneChan lets the query signal the caller when it's done, in case
 	// it's run in a goroutine.
 	doneChan chan<- struct{}
-
-	// persistToDisk indicates whether the filter should also be written
-	// to disk in addition to the memory cache. For "normal" wallets, they'll
-	// almost never need to re-match a filter once it's been fetched unless
-	// they're doing something like a key import.
-	persistToDisk bool
 
 	// optimisticBatch indicates whether we expect more calls to follow,
 	// and that we should attempt to batch more items with the query such
@@ -185,14 +178,6 @@ func Encoding(encoding wire.MessageEncoding) QueryOption {
 func DoneChan(doneChan chan<- struct{}) QueryOption {
 	return func(qo *queryOptions) {
 		qo.doneChan = doneChan
-	}
-}
-
-// PersistToDisk allows the caller to tell that the filter should be kept
-// on disk once it's found.
-func PersistToDisk() QueryOption {
-	return func(qo *queryOptions) {
-		qo.persistToDisk = true
 	}
 }
 
@@ -907,10 +892,9 @@ checkResponses:
 
 // getFilterFromCache returns a filter from ChainService's FilterCache if it
 // exists, returning nil and error if it doesn't.
-func (s *ChainService) getFilterFromCache(blockHash *chainhash.Hash,
-	filterType filterdb.FilterType) (*gcs.Filter, er.R) {
+func (s *ChainService) getFilterFromCache(blockHash *chainhash.Hash) (*gcs.Filter, er.R) {
 
-	cacheKey := cache.FilterCacheKey{BlockHash: *blockHash, FilterType: filterType}
+	cacheKey := cache.FilterCacheKey{BlockHash: *blockHash}
 
 	filterValue, err := s.FilterCache.Get(cacheKey)
 	if err != nil {
@@ -921,10 +905,9 @@ func (s *ChainService) getFilterFromCache(blockHash *chainhash.Hash,
 }
 
 // putFilterToCache inserts a given filter in ChainService's FilterCache.
-func (s *ChainService) putFilterToCache(blockHash *chainhash.Hash,
-	filterType filterdb.FilterType, filter *gcs.Filter) (bool, er.R) {
+func (s *ChainService) putFilterToCache(blockHash *chainhash.Hash, filter *gcs.Filter) (bool, er.R) {
 
-	cacheKey := cache.FilterCacheKey{BlockHash: *blockHash, FilterType: filterType}
+	cacheKey := cache.FilterCacheKey{BlockHash: *blockHash}
 	return s.FilterCache.Put(cacheKey, &cache.CacheableFilter{Filter: filter})
 }
 
@@ -998,6 +981,11 @@ func (s *ChainService) prepareCFiltersQuery(
 	}
 	bestHeight := int64(bestBlock.Height)
 
+	if height > bestBlock.Height {
+		return nil, er.Errorf("Requested cfilters with height [%d] exceeding best block [%d]",
+			height, bestBlock.Height)
+	}
+
 	qo := defaultQueryOptions()
 	qo.applyQueryOptions(options...)
 
@@ -1054,7 +1042,7 @@ func (s *ChainService) prepareCFiltersQuery(
 	// [startHeight-1, stopHeight]. We go one below our startHeight since
 	// the hash of the previous block is needed for validation.
 	numFilters := uint32(stopHeight - startHeight + 1)
-	blockHeaders, _, err := s.BlockHeaders.FetchHeaderAncestors(
+	blockHeaders, _, err := s.NeutrinoDB.FetchBlockHeaderAncestors(
 		numFilters, stopHash,
 	)
 	if err != nil {
@@ -1068,7 +1056,7 @@ func (s *ChainService) prepareCFiltersQuery(
 			numFilters+1, len(blockHeaders))
 	}
 
-	filterHeaders, _, err := s.RegFilterHeaders.FetchHeaderAncestors(
+	filterHeaders, _, err := s.NeutrinoDB.FetchFilterHeaderAncestors(
 		numFilters, stopHash,
 	)
 	if err != nil {
@@ -1177,10 +1165,7 @@ func (s *ChainService) handleCFiltersResponse(q *cfiltersQuery,
 	// requested it.
 	// TODO(halseth): for an LRU we could take care to insert the next
 	// height filter last.
-	dbFilterType := filterdb.RegularFilter
-	evict, errr := s.putFilterToCache(
-		&response.BlockHash, dbFilterType, gotFilter,
-	)
+	evict, errr := s.putFilterToCache(&response.BlockHash, gotFilter)
 	if errr != nil {
 		log.Warnf("Couldn't write filter to cache: %v", errr)
 	}
@@ -1196,18 +1181,6 @@ func (s *ChainService) handleCFiltersResponse(q *cfiltersQuery,
 
 	qo := defaultQueryOptions()
 	qo.applyQueryOptions(q.options...)
-	if qo.persistToDisk {
-		errr := s.FilterDB.PutFilter(
-			&response.BlockHash, gotFilter, dbFilterType,
-		)
-		if errr != nil {
-			log.Warnf("Couldn't write filter to filterDB: "+
-				"%v", errr)
-		}
-
-		log.Tracef("Wrote filter for block %s, type %d",
-			&response.BlockHash, dbFilterType)
-	}
 
 	// Finally, we can delete it from the headerIndex.
 	delete(q.headerIndex, response.BlockHash)
@@ -1224,7 +1197,6 @@ func (s *ChainService) doFilterRequest(
 	blockHash chainhash.Hash,
 	height int32,
 	ft wire.FilterType,
-	filterType filterdb.FilterType,
 	options []QueryOption,
 ) er.R {
 	s.mtxCFilter.Lock()
@@ -1285,7 +1257,7 @@ func (s *ChainService) doFilterRequest(
 			if len(query.headerIndex) > 0 {
 				numFilters := query.stopHeight - query.startHeight + 1
 				log.Errorf("Query failed with %d out of %d filters "+
-					"received", len(query.headerIndex), numFilters)
+					"received", int(numFilters)-len(query.headerIndex), numFilters)
 			}
 			wg.Done()
 		}(q)
@@ -1303,7 +1275,6 @@ func (s *ChainService) doFilterRequest(
 func (s *ChainService) getMoreFiltersIfNeeded(
 	blockHash chainhash.Hash,
 	ft wire.FilterType,
-	filterType filterdb.FilterType,
 	options []QueryOption,
 ) {
 	if blockHash[0] != 0 {
@@ -1316,7 +1287,7 @@ func (s *ChainService) getMoreFiltersIfNeeded(
 		return
 	}
 	go func() {
-		_, height, err := s.BlockHeaders.FetchHeader(&blockHash)
+		_, height, err := s.NeutrinoDB.FetchBlockHeader(&blockHash)
 		if err != nil {
 			// Error so we'll just do nothing
 			return
@@ -1348,35 +1319,22 @@ func (s *ChainService) GetCFilter(blockHash chainhash.Hash,
 		return nil, er.Errorf("unknown filter type: %v", filterType)
 	}
 
-	// Based on if extended is true or not, we'll set up our set of
-	// querying, and db-write functions.
-	dbFilterType := filterdb.RegularFilter
-
 	// First check the cache to see if we already have this filter. If
 	// so, then we can return it an exit early.
-	filter, err := s.getFilterFromCache(&blockHash, dbFilterType)
+	filter, err := s.getFilterFromCache(&blockHash)
 	if err == nil && filter != nil {
-		s.getMoreFiltersIfNeeded(blockHash, filterType, dbFilterType, options)
+		s.getMoreFiltersIfNeeded(blockHash, filterType, options)
 		return filter, nil
 	}
 	if err != nil && !cache.ErrElementNotFound.Is(err) {
 		return nil, err
 	}
 
-	// If not in cache, check if it's in database, returning early if yes.
-	filter, err = s.FilterDB.FetchFilter(&blockHash, dbFilterType)
-	if err == nil && filter != nil {
-		return filter, nil
-	}
-	if err != nil && !filterdb.ErrFilterNotFound.Is(err) {
-		return nil, err
-	}
-
 	doHash := &blockHash
 	var doHeight int64
-	if _, height, err := s.BlockHeaders.FetchHeader(&blockHash); err != nil {
+	if _, height, err := s.NeutrinoDB.FetchBlockHeader(&blockHash); err != nil {
 		return nil, err
-	} else if _, tipHeight, err := s.BlockHeaders.ChainTip(); err != nil {
+	} else if _, tipHeight, err := s.NeutrinoDB.BlockChainTip(); err != nil {
 		return nil, err
 	} else if tipHeight-height < wire.MaxGetCFiltersReqRange {
 		// We're at or near the tip, don't load a batch
@@ -1399,16 +1357,14 @@ func (s *ChainService) GetCFilter(blockHash chainhash.Hash,
 	}
 
 	for {
-		if err := s.doFilterRequest(
-			*doHash, int32(doHeight), filterType, dbFilterType, options,
-		); err != nil {
+		if err := s.doFilterRequest(*doHash, int32(doHeight), filterType, options); err != nil {
 			return nil, err
 		}
 
 		// Since another request might have added the filter to the cache while
 		// we were waiting for the mutex, we do a final lookup before starting
 		// our own query.
-		filter, err = s.getFilterFromCache(&blockHash, dbFilterType)
+		filter, err = s.getFilterFromCache(&blockHash)
 		if err == nil && filter != nil {
 			return filter, nil
 		}
@@ -1416,9 +1372,10 @@ func (s *ChainService) GetCFilter(blockHash chainhash.Hash,
 			return nil, err
 		}
 		// Maybe the block was rolled back while we were fetching ?
-		if _, _, err := s.BlockHeaders.FetchHeader(&blockHash); err != nil {
+		if _, _, err := s.NeutrinoDB.FetchBlockHeader(&blockHash); err != nil {
 			return nil, err
 		}
+		log.Warnf(er.Errorf("Req for filter start %d stophash %s", doHeight, doHash).String())
 		log.Warnf("Made request for filter [%s] but still not in cache, retry",
 			blockHash.String())
 	}
@@ -1433,7 +1390,7 @@ func (s *ChainService) GetBlock(blockHash chainhash.Hash,
 	// Fetch the corresponding block header from the database. If this
 	// isn't found, then we don't have the header for this block so we
 	// can't request it.
-	blockHeader, height, err := s.BlockHeaders.FetchHeader(&blockHash)
+	blockHeader, height, err := s.NeutrinoDB.FetchBlockHeader(&blockHash)
 	if err != nil || blockHeader.BlockHash() != blockHash {
 		return nil, er.Errorf("Couldn't get header for block %s "+
 			"from database", blockHash)
@@ -1517,9 +1474,9 @@ func (s *ChainService) GetBlock0(blockHash chainhash.Hash, height uint32,
 					s.chainParams.PowLimit,
 					s.timeSource,
 				); err != nil {
-					log.Warnf("Invalid block for %s "+
+					log.Warnf("Invalid block for %s (%s) "+
 						"received from %s -- "+
-						"disconnecting peer", blockHash,
+						"disconnecting peer", blockHash, err.Message(),
 						sp.Addr())
 					sp.Disconnect()
 					return false

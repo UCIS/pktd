@@ -5,6 +5,7 @@ import (
 
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/pktwallet/walletdb"
+	"github.com/pkt-cash/pktd/pktwallet/wtxmgr/dbstructs"
 )
 
 // applyMigration is a helper function that allows us to assert the state of the
@@ -121,7 +122,7 @@ func TestMigrationDropTransactionHistory(t *testing.T) {
 			return err
 		}
 
-		b := &BlockMeta{Block: Block{Height: 100}}
+		b := &BlockMeta{Block: dbstructs.Block{Height: 100}}
 		confirmedSpend := spendOutput(&cbRec.Hash, 0, 5e7, 4e7)
 		confirmedSpendRec, err := NewTxRecordFromMsgTx(
 			confirmedSpend, timeNow(),

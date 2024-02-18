@@ -7,6 +7,8 @@ package wallet
 import (
 	"time"
 
+	"github.com/pkt-cash/pktd/blockchain/votecompute/votes"
+	"github.com/pkt-cash/pktd/btcjson"
 	"github.com/pkt-cash/pktd/btcutil"
 	"github.com/pkt-cash/pktd/btcutil/er"
 	"github.com/pkt-cash/pktd/pktlog/log"
@@ -93,6 +95,36 @@ func (w *Wallet) _rollbackBlock(dbtx walletdb.ReadWriteTx, bs waddrmgr.BlockStam
 	w.NtfnServer.notifyDetachedBlock(&bs.Hash)
 
 	return nil
+}
+
+func (w *Wallet) GetVote(addr btcutil.Address) (*btcjson.AddressVoteInfo, er.R) {
+	var out *btcjson.AddressVoteInfo
+	err := walletdb.View(w.db, func(dbtx walletdb.ReadTx) er.R {
+		bs := w.Manager.SyncedTo()
+		txmgrNs := dbtx.ReadBucket(wtxmgrNamespaceKey)
+		if v, err := wtxmgr.FetchAddressNsVote(txmgrNs, addr); err != nil {
+			return err
+		} else if v != nil {
+			expirationBlock := v.VoteBlock + votes.VoteExpirationBlocks
+			if bs.Height >= expirationBlock {
+				return nil
+			}
+			blocksToGo := expirationBlock - bs.Height
+			expSec := bs.Timestamp.Unix() +
+				int64(w.chainParams.TargetTimePerBlock.Seconds())*int64(blocksToGo)
+			out = &btcjson.AddressVoteInfo{
+				IsCandidate:            v.IsCandidate,
+				VoteFor:                v.VoteFor,
+				VoteTxid:               v.VoteTxid,
+				VoteBlock:              v.VoteBlock,
+				ExpirationBlock:        expirationBlock,
+				EstimatedExpirationSec: expSec,
+			}
+			return nil
+		}
+		return nil
+	})
+	return out, err
 }
 
 func (w *Wallet) addRelevantTx(dbtx walletdb.ReadWriteTx, rec *wtxmgr.TxRecord, block *wtxmgr.BlockMeta) er.R {

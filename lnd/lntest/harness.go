@@ -296,7 +296,7 @@ func (n *NetworkHarness) NewNodeWithSeed(name string, extraArgs []string,
 	// Create a request to generate a new aezeed. The new seed will have the
 	// same password as the internal wallet.
 	genSeedReq := &lnrpc.GenSeedRequest{
-		AezeedPassphrase: password,
+		SeedPassphraseBin: password,
 	}
 
 	ctxt, _ := context.WithTimeout(ctxb, timeout)
@@ -308,15 +308,14 @@ func (n *NetworkHarness) NewNodeWithSeed(name string, extraArgs []string,
 	// With the seed created, construct the init request to the node,
 	// including the newly generated seed.
 	initReq := &lnrpc.InitWalletRequest{
-		WalletPassword:     password,
-		CipherSeedMnemonic: genSeedResp.CipherSeedMnemonic,
-		AezeedPassphrase:   password,
-		StatelessInit:      statelessInit,
+		WalletPassphraseBin: password,
+		WalletSeed:          genSeedResp.Seed,
+		SeedPassphraseBin:   password,
 	}
 
 	// Pass the init request via rpc to finish unlocking the node. This will
 	// also initialize the macaroon-authenticated LightningClient.
-	response, err := node.Init(ctxb, initReq)
+	_, err = node.Init(ctxb, initReq)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -329,7 +328,7 @@ func (n *NetworkHarness) NewNodeWithSeed(name string, extraArgs []string,
 	// to return to the test, otherwise gRPC calls won't be possible since
 	// there are no macaroon files created in that mode.
 	// In stateful init the admin macaroon will just be nil.
-	return node, genSeedResp.CipherSeedMnemonic, response.AdminMacaroon, nil
+	return node, genSeedResp.Seed, nil, nil
 }
 
 // RestoreNodeWithSeed fully initializes a HarnessNode using a chosen mnemonic,
@@ -347,11 +346,11 @@ func (n *NetworkHarness) RestoreNodeWithSeed(name string, extraArgs []string,
 	}
 
 	initReq := &lnrpc.InitWalletRequest{
-		WalletPassword:     password,
-		CipherSeedMnemonic: mnemonic,
-		AezeedPassphrase:   password,
-		RecoveryWindow:     recoveryWindow,
-		ChannelBackups:     chanBackups,
+		WalletPassphraseBin: password,
+		WalletSeed:          mnemonic,
+		SeedPassphraseBin:   password,
+		RecoveryWindow:      recoveryWindow,
+		ChannelBackups:      chanBackups,
 	}
 
 	_, err = node.Init(context.Background(), initReq)
@@ -465,7 +464,7 @@ func (n *NetworkHarness) EnsureConnected(ctx context.Context, a, b *HarnessNode)
 
 		req := &lnrpc.ConnectPeerRequest{
 			Addr: &lnrpc.LightningAddress{
-				Pubkey: bInfo.IdentityPubkey,
+				Pubkey: string(bInfo.IdentityPubkey),
 				Host:   b.Cfg.P2PAddr(),
 			},
 		}
@@ -537,7 +536,7 @@ func (n *NetworkHarness) EnsureConnected(ctx context.Context, a, b *HarnessNode)
 		}
 
 		for _, peer := range resp.Peers {
-			if peer.PubKey == a.PubKeyStr {
+			if string(peer.PubKey) == a.PubKeyStr {
 				return true
 			}
 		}
@@ -569,7 +568,7 @@ func (n *NetworkHarness) ConnectNodes(ctx context.Context, a, b *HarnessNode) er
 
 	req := &lnrpc.ConnectPeerRequest{
 		Addr: &lnrpc.LightningAddress{
-			Pubkey: bobInfo.IdentityPubkey,
+			Pubkey: string(bobInfo.IdentityPubkey),
 			Host:   b.Cfg.P2PAddr(),
 		},
 	}
@@ -588,7 +587,7 @@ func (n *NetworkHarness) ConnectNodes(ctx context.Context, a, b *HarnessNode) er
 		}
 
 		for _, peer := range resp.Peers {
-			if peer.PubKey == b.PubKeyStr {
+			if string(peer.PubKey) == b.PubKeyStr {
 				return true
 			}
 		}
@@ -650,7 +649,7 @@ func (n *NetworkHarness) RestartNode(node *HarnessNode, callback func() er.R,
 	// Otherwise, we'll unlock the wallet, then complete the final steps
 	// for the node initialization process.
 	unlockReq := &lnrpc.UnlockWalletRequest{
-		WalletPassword: node.Cfg.Password,
+		WalletPassphraseBin: node.Cfg.Password,
 	}
 	if len(chanBackups) != 0 {
 		unlockReq.ChannelBackups = chanBackups[0]
@@ -1076,7 +1075,7 @@ func (n *NetworkHarness) CloseChannel(ctx context.Context,
 		if err != nil {
 			return nil, nil, err
 		}
-		receivingNode, err := n.LookUpNodeByPub(targetChan.RemotePubkey)
+		receivingNode, err := n.LookUpNodeByPub(string(targetChan.RemotePubkey))
 		if err != nil {
 			return nil, nil, err
 		}

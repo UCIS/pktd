@@ -371,8 +371,10 @@ func (sm *SyncManager) startSync() {
 		// syncPeer to avoid instantly detecting it as stalled in the
 		// event the progress time hasn't been updated recently.
 		sm.lastProgressTime = time.Now()
-	} else {
-		log.Warnf("No sync peer candidates available")
+	} else if !sm.chain.IsCurrent() {
+		log.Warnf("No sync peer candidates available "+
+			"and best block [%s @ %s] over 24 hours old",
+			best.Hash, best.Height)
 	}
 }
 
@@ -507,19 +509,13 @@ func (sm *SyncManager) shouldDCStalledSyncPeer() bool {
 // the current sync peer, attempts to select a new best peer to sync from.  It
 // is invoked from the syncHandler goroutine.
 func (sm *SyncManager) handleDonePeerMsg(peer *peerpkg.Peer) {
-	state, exists := sm.peerStates[peer]
-	if !exists {
-		log.Warnf("Received done peer message for unknown peer %s", peer)
-		return
+	// If not, then it's disconnected because we banned it
+	if state, exists := sm.peerStates[peer]; exists {
+		// Remove the peer from the list of candidate peers.
+		delete(sm.peerStates, peer)
+		log.Infof("Lost peer %s", peer)
+		sm.clearRequestedState(state)
 	}
-
-	// Remove the peer from the list of candidate peers.
-	delete(sm.peerStates, peer)
-
-	log.Infof("Lost peer %s", peer)
-
-	sm.clearRequestedState(state)
-
 	if peer == sm.syncPeer {
 		// Update the sync peer. The server has already disconnected the
 		// peer before signaling to the sync manager.
@@ -1192,7 +1188,7 @@ func (sm *SyncManager) handleInvMsg(imsg *invMsg) {
 				// Also skip if it has already been requested, so
 				// we don't end up doing things multiple times.
 				if _, exists := sm.requestedTxns[iv.Hash]; exists {
-					log.Infof("Skipping already requested transaction from %s", peer)
+					log.Debugf("Skipping already requested transaction from %s", peer)
 					continue
 				}
 			}

@@ -24,32 +24,47 @@ option go_package = "github.com/pkt-cash/pktd/lnd/lnrpc";
 
 // Lightning is the main RPC server of the daemon.
 service Lightning {
-    /* lncli: `walletbalance`
+    /*
+    $pld.category: `Wallet`
+    $pld.short_description: `Compute and display the wallet's current balance`
+
     WalletBalance returns total unspent outputs(confirmed and unconfirmed), all
     confirmed unspent outputs and all unconfirmed unspent outputs under control
     of the wallet.
     */
     rpc WalletBalance (WalletBalanceRequest) returns (WalletBalanceResponse);
 
-    /* lncli: `getaddressbalances`
+    /*
+    $pld.category: `Address`
+    $pld.short_description: `Compute and display balances for each address in the wallet`
+
     GetAddressBalances returns the balance for each of the addresses in the wallet.
      */                                                                                              
      rpc GetAddressBalances (GetAddressBalancesRequest) returns (GetAddressBalancesResponse);
 
-    /* lncli: `channelbalance`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Returns the sum of the total available channel balance across all open channels`
+
     ChannelBalance returns a report on the total funds across all open channels,
     categorized in local/remote, pending local/remote and unsettled local/remote
     balances.
     */
     rpc ChannelBalance (ChannelBalanceRequest) returns (ChannelBalanceResponse);
 
-    /* lncli: `listchaintxns`
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `List transactions from the wallet`
+
     GetTransactions returns a list describing all the known transactions
     relevant to the wallet.
     */
     rpc GetTransactions (GetTransactionsRequest) returns (TransactionDetails);
 
-    /* lncli: `estimatefee`
+    /*
+    $pld.category: `Neutrino`
+    $pld.short_description: `Get fee estimates for sending bitcoin on-chain to multiple addresses`
+
     EstimateFee asks the chain backend to estimate the fee rate and total fees
     for a transaction that pays to multiple specified outputs.
 
@@ -60,7 +75,10 @@ service Lightning {
     */
     rpc EstimateFee (EstimateFeeRequest) returns (EstimateFeeResponse);
 
-    /* lncli: `sendcoins`
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `Send bitcoin on-chain to an address`
+
     SendCoins executes a request to send coins to a particular address. Unlike
     SendMany, this RPC call only allows creating a single output at a time. If
     neither target_conf, or sat_per_byte are set, then the internal wallet will
@@ -85,7 +103,10 @@ service Lightning {
     rpc SubscribeTransactions (GetTransactionsRequest)
         returns (stream Transaction);
 
-    /* lncli: `sendmany`
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `Send bitcoin on-chain to multiple addresses`
+
     SendMany handles a request for a transaction that creates multiple specified
     outputs in parallel. If neither target_conf, or sat_per_byte are set, then
     the internal wallet will consult its fee model to determine a fee for the
@@ -93,41 +114,45 @@ service Lightning {
     */
     rpc SendMany (SendManyRequest) returns (SendManyResponse);
 
-    /* lncli: `newaddress`
+    /*
     NewAddress creates a new address under control of the local wallet.
     */
     rpc NewAddress (NewAddressRequest) returns (NewAddressResponse);
 
-    /* lncli: `signmessage`
+    /*
+    $pld.category: `Address`
+    $pld.short_description: `Signs a message using the private key of a payment address`
+
     SignMessage signs a message with this node's private key. The returned
     signature string is `zbase32` encoded and pubkey recoverable, meaning that
     only the message digest and signature are needed for verification.
     */
     rpc SignMessage (SignMessageRequest) returns (SignMessageResponse);
 
-    /* lncli: `verifymessage`
-    VerifyMessage verifies a signature over a msg. The signature must be
-    zbase32 encoded and signed by an active node in the resident node's
-    channel database. In addition to returning the validity of the signature,
-    VerifyMessage also returns the recovered pubkey from the signature.
-    */
-    rpc VerifyMessage (VerifyMessageRequest) returns (VerifyMessageResponse);
+    /*
+    $pld.category: `Peer`
+    $pld.short_description: `Connect to a remote pld peer`
 
-    /* lncli: `connect`
     ConnectPeer attempts to establish a connection to a remote peer. This is at
     the networking level, and is used for communication between nodes. This is
     distinct from establishing a channel with a peer.
     */
     rpc ConnectPeer (ConnectPeerRequest) returns (ConnectPeerResponse);
 
-    /* lncli: `disconnect`
+    /*
+    $pld.category: `Peer`
+    $pld.short_description: `Disconnect a remote pld peer identified by public key`
+
     DisconnectPeer attempts to disconnect one peer from another identified by a
     given pubKey. In the case that we currently have a pending or active channel
     with the target peer, then this action will be not be allowed.
     */
     rpc DisconnectPeer (DisconnectPeerRequest) returns (DisconnectPeerResponse);
 
-    /* lncli: `listpeers`
+    /*
+    $pld.category: `Peer`
+    $pld.short_description: `List all active, currently connected peers`
+
     ListPeers returns a verbose listing of all currently active peers.
     */
     rpc ListPeers (ListPeersRequest) returns (ListPeersResponse);
@@ -139,7 +164,7 @@ service Lightning {
     */
     rpc SubscribePeerEvents (PeerEventSubscription) returns (stream PeerEvent);
 
-    /* lncli: `getinfo`
+    /*
     GetInfo returns general information concerning the lightning node including
     it's identity pubkey, alias, the chains it is connected to, and information
     concerning the number of open+pending channels.
@@ -155,7 +180,10 @@ service Lightning {
         returns (GetRecoveryInfoResponse);
 
     // TODO(roasbeef): merge with below with bool?
-    /* lncli: `pendingchannels`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Display information pertaining to pending channels`
+
     PendingChannels returns a list of all the channels that are currently
     considered "pending". A channel is pending if it has finished the funding
     workflow and is waiting for confirmations for the funding txn, or is in the
@@ -164,7 +192,10 @@ service Lightning {
     rpc PendingChannels (PendingChannelsRequest)
         returns (PendingChannelsResponse);
 
-    /* lncli: `listchannels`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `List all open channels`
+
     ListChannels returns a description of all the open channels that this node
     is a participant in.
     */
@@ -179,7 +210,10 @@ service Lightning {
     rpc SubscribeChannelEvents (ChannelEventSubscription)
         returns (stream ChannelEventUpdate);
 
-    /* lncli: `closedchannels`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `List all closed channels`
+
     ClosedChannels returns a description of all the closed channels that
     this node was a participant in.
     */
@@ -193,7 +227,10 @@ service Lightning {
     */
     rpc OpenChannelSync (OpenChannelRequest) returns (ChannelPoint);
 
-    /* lncli: `openchannel`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Open a channel to a node or an existing peer`
+
     OpenChannel attempts to open a singly funded channel specified in the
     request to a remote peer. Users are able to specify a target number of
     blocks that the funding transaction should be confirmed in, or a manual fee
@@ -227,7 +264,10 @@ service Lightning {
     rpc ChannelAcceptor (stream ChannelAcceptResponse)
         returns (stream ChannelAcceptRequest);
 
-    /* lncli: `closechannel`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Close an existing channel`
+
     CloseChannel attempts to close an active channel identified by its channel
     outpoint (ChannelPoint). The actions of this method can additionally be
     augmented to attempt a force close after a timeout period in the case of an
@@ -238,7 +278,10 @@ service Lightning {
     */
     rpc CloseChannel (CloseChannelRequest) returns (stream CloseStatusUpdate);
 
-    /* lncli: `abandonchannel`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Abandons an existing channel`
+
     AbandonChannel removes all channel state from the database except for a
     close summary. This method can be used to get rid of permanently unusable
     channels due to bugs fixed in newer versions of lnd. This method can also be
@@ -248,7 +291,7 @@ service Lightning {
     */
     rpc AbandonChannel (AbandonChannelRequest) returns (AbandonChannelResponse);
 
-    /* lncli: `sendpayment`
+    /*
     Deprecated, use routerrpc.SendPaymentV2. SendPayment dispatches a
     bi-directional streaming RPC for sending payments through the Lightning
     Network. A single RPC invocation creates a persistent bi-directional
@@ -284,14 +327,20 @@ service Lightning {
     */
     rpc SendToRouteSync (SendToRouteRequest) returns (SendResponse);
 
-    /* lncli: `addinvoice`
+    /*
+    $pld.category: `Invoice`
+    $pld.short_description: `Add a new invoice`
+
     AddInvoice attempts to add a new invoice to the invoice database. Any
     duplicated invoices are rejected, therefore all invoices *must* have a
     unique payment preimage.
     */
     rpc AddInvoice (Invoice) returns (AddInvoiceResponse);
 
-    /* lncli: `listinvoices`
+    /*
+    $pld.category: `Invoice`
+    $pld.short_description: `List all invoices currently stored within the database. Any active debug invoices are ignored`
+
     ListInvoices returns a list of all the invoices currently stored within the
     database. Any active debug invoices are ignored. It has full support for
     paginated responses, allowing users to query for specific invoices through
@@ -302,7 +351,10 @@ service Lightning {
     */
     rpc ListInvoices (ListInvoiceRequest) returns (ListInvoiceResponse);
 
-    /* lncli: `lookupinvoice`
+    /*
+    $pld.category: `Invoice`
+    $pld.short_description: `Lookup an existing invoice by its payment hash`
+
     LookupInvoice attempts to look up an invoice according to its payment hash.
     The passed payment hash *must* be exactly 32 bytes, if not, an error is
     returned.
@@ -322,14 +374,20 @@ service Lightning {
     */
     rpc SubscribeInvoices (InvoiceSubscription) returns (stream Invoice);
 
-    /* lncli: `decodepayreq`
+    /*
+    $pld.category: `Invoice`
+    $pld.short_description: `Decode a payment request`
+
     DecodePayReq takes an encoded payment request string and attempts to decode
     it, returning a full description of the conditions encoded within the
     payment request.
     */
     rpc DecodePayReq (PayReqString) returns (PayReq);
 
-    /* lncli: `listpayments`
+    /*
+    $pld.category: `Payment`
+    $pld.short_description: `List all outgoing payments`
+
     ListPayments returns a list of all outgoing payments.
     */
     rpc ListPayments (ListPaymentsRequest) returns (ListPaymentsResponse);
@@ -340,7 +398,10 @@ service Lightning {
     rpc DeleteAllPayments (DeleteAllPaymentsRequest)
         returns (DeleteAllPaymentsResponse);
 
-    /* lncli: `describegraph`
+    /*
+    $pld.category: `Graph`
+    $pld.short_description: `Describe the network graph`
+
     DescribeGraph returns a description of the latest graph state from the
     point of view of the node. The graph information is partitioned into two
     components: all the nodes/vertexes, and all the edges that connect the
@@ -350,13 +411,19 @@ service Lightning {
     */
     rpc DescribeGraph (ChannelGraphRequest) returns (ChannelGraph);
 
-    /* lncli: `getnodemetrics`
+    /*
+    $pld.category: `Graph`
+    $pld.short_description: `Get node metrics`
+
     GetNodeMetrics returns node metrics calculated from the graph. Currently
     the only supported metric is betweenness centrality of individual nodes.
     */
     rpc GetNodeMetrics (NodeMetricsRequest) returns (NodeMetricsResponse);
 
-    /* lncli: `getchaninfo`
+    /*
+    $pld.category: `Graph`
+    $pld.short_description: `Get the state of a channel`
+
     GetChanInfo returns the latest authenticated network announcement for the
     given channel identified by its channel ID: an 8-byte integer which
     uniquely identifies the location of transaction's funding output within the
@@ -364,13 +431,19 @@ service Lightning {
     */
     rpc GetChanInfo (ChanInfoRequest) returns (ChannelEdge);
 
-    /* lncli: `getnodeinfo`
+    /*
+    $pld.category: `Graph`
+    $pld.short_description: `Get information on a specific node`
+
     GetNodeInfo returns the latest advertised, aggregated, and authenticated
     channel information for the specified node identified by its public key.
     */
     rpc GetNodeInfo (NodeInfoRequest) returns (NodeInfo);
 
-    /* lncli: `queryroutes`
+    /*
+    $pld.category: `Payment`
+    $pld.short_description: `Query a route to a destination`
+
     QueryRoutes attempts to query the daemon's Channel Router for a possible
     route to a target destination capable of carrying a specific amount of
     satoshis. The returned route contains the full details required to craft and
@@ -384,13 +457,19 @@ service Lightning {
     */
     rpc QueryRoutes (QueryRoutesRequest) returns (QueryRoutesResponse);
 
-    /* lncli: `getnetworkinfo`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Get statistical information about the current state of the network`
+
     GetNetworkInfo returns some basic stats about the known channel graph from
     the point of view of the node.
     */
     rpc GetNetworkInfo (NetworkInfoRequest) returns (NetworkInfo);
 
-    /* lncli: `stop`
+    /*
+    $pld.category: `Meta`
+    $pld.short_description: `Stop and shutdown the daemon`
+
     StopDaemon will send a shutdown request to the interrupt handler, triggering
     a graceful shutdown of the daemon.
     */
@@ -407,7 +486,10 @@ service Lightning {
     rpc SubscribeChannelGraph (GraphTopologySubscription)
         returns (stream GraphTopologyUpdate);
 
-    /* lncli: `debuglevel`
+    /*
+    $pld.category: `Meta`
+    $pld.short_description: `Set the debug level`
+
     DebugLevel allows a caller to programmatically set the logging verbosity of
     lnd. The logging can be targeted according to a coarse daemon-wide logging
     level, or in a granular fashion to specify the logging for a target
@@ -415,20 +497,29 @@ service Lightning {
     */
     rpc DebugLevel (DebugLevelRequest) returns (DebugLevelResponse);
 
-    /* lncli: `feereport`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Display the current fee policies of all active channels`
+
     FeeReport allows the caller to obtain a report detailing the current fee
     schedule enforced by the node globally for each channel.
     */
     rpc FeeReport (FeeReportRequest) returns (FeeReportResponse);
 
-    /* lncli: `updatechanpolicy`
+    /*
+    $pld.category: `Channel`
+    $pld.short_description: `Update the channel policy for all channels, or a single channel`
+
     UpdateChannelPolicy allows the caller to update the fee schedule and
     channel policies for all channels globally, or a particular channel.
     */
     rpc UpdateChannelPolicy (PolicyUpdateRequest)
         returns (PolicyUpdateResponse);
 
-    /* lncli: `fwdinghistory`
+    /*
+    $pld.category: `Payment`
+    $pld.short_description: `Query the history of all forwarded HTLCs`
+
     ForwardingHistory allows the caller to query the htlcswitch for a record of
     all HTLCs forwarded within the target time range, and integer offset
     within that time range. If no time-range is specified, then the first chunk
@@ -443,7 +534,10 @@ service Lightning {
     rpc ForwardingHistory (ForwardingHistoryRequest)
         returns (ForwardingHistoryResponse);
 
-    /* lncli: `exportchanbackup`
+    /*
+    $pld.category: `Backup`
+    $pld.short_description: `Obtain a static channel back up for a selected channels, or all known channels`
+
     ExportChannelBackup attempts to return an encrypted static channel backup
     for the target channel identified by it channel point. The backup is
     encrypted with a key generated from the aezeed seed of the user. The
@@ -465,6 +559,9 @@ service Lightning {
         returns (ChanBackupSnapshot);
 
     /*
+    $pld.category: `Backup`
+    $pld.short_description: `Verify an existing channel backup`
+
     VerifyChanBackup allows a caller to verify the integrity of a channel backup
     snapshot. This method will accept either a packed Single or a packed Multi.
     Specifying both will result in an error.
@@ -472,7 +569,10 @@ service Lightning {
     rpc VerifyChanBackup (ChanBackupSnapshot)
         returns (VerifyChanBackupResponse);
 
-    /* lncli: `restorechanbackup`
+    /*
+    $pld.category: `Backup`
+    $pld.short_description: `Restore an existing single or multi-channel static channel backup`
+
     RestoreChannelBackups accepts a set of singular channel backups, or a
     single encrypted multi-chan backup and attempts to recover any funds
     remaining within the channel. If we are able to unpack the backup, then the
@@ -493,32 +593,129 @@ service Lightning {
     rpc SubscribeChannelBackups (ChannelBackupSubscription)
         returns (stream ChanBackupSnapshot);
 
-    /* lncli: `bakemacaroon`
-    BakeMacaroon allows the creation of a new macaroon with custom read and
-    write permissions. No first-party caveats are added since this can be done
-    offline.
-    */
-    rpc BakeMacaroon (BakeMacaroonRequest) returns (BakeMacaroonResponse);
+    /*
+    $pld.category: `Unspent`
+    $pld.short_description: `Scan over the chain to find any transactions which may not have been recorded in the wallet's database`
 
-    /* lncli: `listmacaroonids`
-    ListMacaroonIDs returns all root key IDs that are in use.
-    */
-    rpc ListMacaroonIDs (ListMacaroonIDsRequest)
-        returns (ListMacaroonIDsResponse);
+    Scan over the chain to find any transactions which may not have been recorded in the wallet's database*/
+    rpc ReSync (ReSyncChainRequest) returns (ReSyncChainResponse);
 
-    /* lncli: `deletemacaroonid`
-    DeleteMacaroonID deletes the specified macaroon ID and invalidates all
-    macaroons derived from that ID.
-    */
-    rpc DeleteMacaroonID (DeleteMacaroonIDRequest)
-        returns (DeleteMacaroonIDResponse);
+    /*
+    $pld.category: `Unspent`
+    $pld.short_description: `Stop a re-synchronization job before it's completion`
 
-    /* lncli: `listpermissions`
-    ListPermissions lists all RPC method URIs and their required macaroon
-    permissions to access them.
-    */
-    rpc ListPermissions (ListPermissionsRequest)
-        returns (ListPermissionsResponse);
+    Stop a re-synchronization job before it's completion*/
+    rpc StopReSync (StopReSyncRequest) returns (StopReSyncResponse);
+
+    /*
+    $pld.category: `Wallet`
+    $pld.short_description: `Get the wallet seed words for this wallet`
+
+    Get the wallet seed words for this wallet*/
+    rpc GetWalletSeed (GetWalletSeedRequest) returns (GetWalletSeedResponse);
+
+    /*
+    $pld.category: `Seed`
+    $pld.short_description: `Alter the passphrase which is used to encrypt a wallet seed`
+
+    Change seed's passphrase */
+    rpc ChangeSeedPassphrase (ChangeSeedPassphraseRequest) returns (ChangeSeedPassphraseResponse);
+
+    /*
+    $pld.category: `Wallet`
+    $pld.short_description: `Get a secret seed`
+
+    Get a secret seed which is generated using the wallet's private key, this can be used as a password for another application*/
+    rpc GetSecret (GetSecretRequest) returns (GetSecretResponse);
+
+    /*
+    $pld.category: `Address`
+    $pld.short_description: `Imports a WIF-encoded private key to the 'imported' account`
+
+    Imports a WIF-encoded private key to the 'imported' account.*/
+    rpc ImportPrivKey (ImportPrivKeyRequest) returns (ImportPrivKeyResponse);
+
+    /*
+    $pld.category: `Address`
+    $pld.short_description: `Returns the private key in WIF encoding that controls some wallet address`
+
+    Returns the private key in WIF encoding that controls some wallet address.*/
+    rpc DumpPrivKey (DumpPrivKeyRequest) returns (DumpPrivKeyResponse);
+
+    /*
+    $pld.category: `Lock`
+    $pld.short_description: `Returns a JSON array of outpoints marked as locked (with lockunspent) for this wallet session`
+
+    Returns a JSON array of outpoints marked as locked (with lockunspent) for this wallet session.*/
+    rpc ListLockUnspent (ListLockUnspentRequest) returns (ListLockUnspentResponse);
+
+    /*
+    $pld.category: `Lock`
+    $pld.short_description: `Locks or unlocks an unspent output`
+
+    Locks or unlocks an unspent output*/
+    rpc LockUnspent (LockUnspentRequest) returns (LockUnspentResponse);
+
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `Create a transaction but do not send it to the chain`
+
+    Create a transaction but po not send it to the chain*/
+    rpc CreateTransaction (CreateTransactionRequest) returns (CreateTransactionResponse);
+
+    /*
+    $pld.category: `Address`
+    $pld.short_description: `Generates a new address`
+
+    Generates and returns a new payment address*/
+    rpc GetNewAddress (GetNewAddressRequest) returns (GetNewAddressResponse);
+
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `Returns a JSON object with details regarding a transaction relevant to this wallet`
+
+    Returns a JSON object with details regarding a transaction relevant to this wallet.*/
+    rpc GetTransaction (GetTransactionRequest) returns (GetTransactionResponse);
+
+    /*
+    $pld.category: `Network Steward Vote`
+    $pld.short_description: `Configure the wallet to vote for a network steward when making payments (note: payments to segwit addresses cannot vote)`
+
+    Configure the wallet to vote for a network steward when making payments (note: payments to segwit addresses cannot vote)*/
+    rpc SetNetworkStewardVote (SetNetworkStewardVoteRequest) returns (SetNetworkStewardVoteResponse);
+    
+    /*
+    $pld.category: `Network Steward Vote`
+    $pld.short_description: `Find out how the wallet is currently configured to vote in a network steward election`
+
+    Find out how the wallet is currently configured to vote in a network steward election*/
+    rpc GetNetworkStewardVote (GetNetworkStewardVoteRequest) returns (GetNetworkStewardVoteResponse);
+
+    /*
+    $pld.category: `Neutrino`
+    $pld.short_description: `Broadcast a transaction onchain`
+
+    Broadcast a transaction*/
+    rpc BcastTransaction (BcastTransactionRequest) returns (BcastTransactionResponse);
+
+    /*
+    $pld.category: `Transaction`
+    $pld.short_description: `Authors, signs, and sends a transaction that outputs some amount to a payment address`
+
+    SendFrom authors, signs, and sends a transaction that outputs some amount to a payment address.*/
+    rpc SendFrom (SendFromRequest) returns (SendFromResponse);
+    
+    /*
+    $pld.category: `Util`
+    $pld.short_description: `Returns a JSON object representing the provided serialized, hex-encoded transaction.`
+
+    DecodeRawTransaction returns a JSON object representing the provided serialized, hex-encoded transaction.*/
+    rpc DecodeRawTransaction (DecodeRawTransactionRequest) returns (DecodeRawTransactionResponse);
+}
+
+message RestError {
+	string message = 2;
+	repeated string stack = 3;
 }
 
 message Utxo {
@@ -567,15 +764,14 @@ message Transaction {
     repeated string dest_addresses = 8;
 
     // The raw transaction hex.
-    string raw_tx_hex = 9;
+    bytes raw_tx_hex = 9;
 
     // A label that was optionally set on transaction broadcast.
     string label = 10;
 }
 message GetTransactionsRequest {
     /*
-    The height from which to list transactions, inclusive. If this value is
-    greater than end_height, transactions will be read in reverse.
+    The height from which to list transactions, inclusive.
     */
     int32 start_height = 1;
 
@@ -587,6 +783,15 @@ message GetTransactionsRequest {
     default to this option.
     */
     int32 end_height = 2;
+    int32 txns_limit = 3;
+    int32 txns_skip = 4;
+    int32 coinbase = 5;
+    /*
+    If set, the payments returned will result from seeking backwards from the
+    specified index offset. This can be used to paginate backwards. The order
+    of the returned payments is always oldest first (ascending index order).
+    */
+    bool reversed = 6;
 }
 
 message TransactionDetails {
@@ -617,16 +822,9 @@ message FeeLimit {
 
 message SendRequest {
     /*
-    The identity pubkey of the payment recipient. When using REST, this field
-    must be encoded as base64.
+    The identity pubkey of the payment recipient.
     */
     bytes dest = 1;
-
-    /*
-    The hex-encoded identity pubkey of the payment recipient. Deprecated now
-    that the REST gateway supports base64 encoding of bytes fields.
-    */
-    string dest_string = 2 [deprecated = true];
 
     /*
     The amount to send expressed in satoshis.
@@ -643,16 +841,9 @@ message SendRequest {
     int64 amt_msat = 12;
 
     /*
-    The hash to use within the payment's HTLC. When using REST, this field
-    must be encoded as base64.
+    The hash to use within the payment's HTLC.
     */
     bytes payment_hash = 4;
-
-    /*
-    The hex-encoded hash to use within the payment's HTLC. Deprecated now
-    that the REST gateway supports base64 encoding of bytes fields.
-    */
-    string payment_hash_string = 5 [deprecated = true];
 
     /*
     A bare-bones invoice for a payment within the Lightning Network. With the
@@ -697,8 +888,7 @@ message SendRequest {
     An optional field that can be used to pass an arbitrary set of TLV records
     to a peer which understands the new records. This can be used to pass
     application specific data during the payment attempt. Record types are
-    required to be in the custom range >= 65536. When using REST, the values
-    must be encoded as base64.
+    required to be in the custom range >= 65536.
     */
     map<uint64, bytes> dest_custom_records = 11;
 
@@ -724,17 +914,11 @@ message SendResponse {
 
 message SendToRouteRequest {
     /*
-    The payment hash to use for the HTLC. When using REST, this field must be
-    encoded as base64.
+    The payment hash to use for the HTLC.
     */
     bytes payment_hash = 1;
 
-    /*
-    An optional hex-encoded payment hash to be used for the HTLC. Deprecated now
-    that the REST gateway supports base64 encoding of bytes fields.
-    */
-    string payment_hash_string = 2 [deprecated = true];
-
+    reserved 2;
     reserved 3;
 
     // Route that should be used to attempt to complete the payment.
@@ -853,8 +1037,7 @@ message ChannelAcceptResponse {
 message ChannelPoint {
     oneof funding_txid {
         /*
-        Txid of the funding transaction. When using REST, this field must be
-        encoded as base64.
+        Txid of the funding transaction.
         */
         bytes funding_txid_bytes = 1;
 
@@ -1006,32 +1189,19 @@ message NewAddressResponse {
 
 message SignMessageRequest {
     /*
-    The message to be signed. When using REST, this field must be encoded as
-    base64.
+    The message to be signed.
     */
-    bytes msg = 1;
+    string msg = 1;
+
+    // If specified then will override msg, binary form.
+    bytes msg_bin = 2;
+
+    // Address to select for signing with.
+    string address = 3;
 }
 message SignMessageResponse {
     // The signature for the given message
     string signature = 1;
-}
-
-message VerifyMessageRequest {
-    /*
-    The message over which the signature is to be verified. When using REST,
-    this field must be encoded as base64.
-    */
-    bytes msg = 1;
-
-    // The signature to be verified over the given message
-    string signature = 2;
-}
-message VerifyMessageResponse {
-    // Whether the signature was valid over the given message
-    bool valid = 1;
-
-    // The pubkey recovered from the signature
-    string pubkey = 2;
 }
 
 message ConnectPeerRequest {
@@ -1053,7 +1223,7 @@ message ConnectPeerResponse {
 
 message DisconnectPeerRequest {
     // The pubkey of the node to disconnect from
-    string pub_key = 1;
+    bytes pub_key = 1;
 }
 message DisconnectPeerResponse {
 }
@@ -1137,7 +1307,7 @@ message Channel {
     bool active = 1;
 
     // The identity pubkey of the remote node
-    string remote_pubkey = 2;
+    bytes remote_pubkey = 2;
 
     /*
     The outpoint (txid:index) of the funding transaction. With this value, Bob
@@ -1323,7 +1493,7 @@ message ChannelCloseSummary {
     string closing_tx_hash = 4;
 
     // Public key of the remote peer that we formerly had a channel with.
-    string remote_pubkey = 5;
+    bytes remote_pubkey = 5;
 
     // Total capacity of the channel.
     int64 capacity = 6;
@@ -1454,7 +1624,7 @@ message ClosedChannelsResponse {
 
 message Peer {
     // The identity pubkey of the peer
-    string pub_key = 1;
+    bytes pub_key = 1;
 
     // Network address of the peer; eg `127.0.0.1:10011`
     string address = 3;
@@ -1550,7 +1720,7 @@ message PeerEventSubscription {
 
 message PeerEvent {
     // The identity pubkey of the peer.
-    string pub_key = 1;
+    bytes pub_key = 1;
 
     enum EventType {
         PEER_ONLINE = 0;
@@ -1570,7 +1740,7 @@ message GetInfoResponse {
     string commit_hash = 20;
 
     // The identity pubkey of the current node.
-    string identity_pubkey = 1;
+    bytes identity_pubkey = 1;
 
     // If applicable, the alias of the current node, e.g. "bob"
     string alias = 2;
@@ -1729,21 +1899,14 @@ message ReadyForPsbtFunding {
 
 message OpenChannelRequest {
     /*
-    The pubkey of the node to open a channel with. When using REST, this field
-    must be encoded as base64.
+    The pubkey of the node to open a channel with.
     */
     bytes node_pubkey = 2;
 
-    /*
-    The hex encoded pubkey of the node to open a channel with. Deprecated now
-    that the REST gateway supports base64 encoding of bytes fields.
-    */
-    string node_pubkey_string = 3 [deprecated = true];
-
-    // The number of satoshis the wallet should commit to the channel
+    // The number of pktoshis the wallet should commit to the channel
     int64 local_funding_amount = 4;
 
-    // The number of satoshis to push to the remote side as part of the initial
+    // The number of pktoshis to push to the remote side as part of the initial
     // commitment state
     int64 push_sat = 5;
 
@@ -2033,7 +2196,7 @@ message PendingChannelsRequest {
 }
 message PendingChannelsResponse {
     message PendingChannel {
-        string remote_node_pub = 1;
+        bytes remote_node_pub = 1;
         string channel_point = 2;
 
         int64 capacity = 3;
@@ -2306,8 +2469,8 @@ message ChannelBalanceResponse {
 }
 
 message QueryRoutesRequest {
-    // The 33-byte hex-encoded public key for the payment destination
-    string pub_key = 1;
+    // The 33-byte public key for the payment destination
+    bytes pub_key = 1;
 
     /*
     The amount to send expressed in satoshis.
@@ -2343,8 +2506,7 @@ message QueryRoutesRequest {
     FeeLimit fee_limit = 5;
 
     /*
-    A list of nodes to ignore during path finding. When using REST, these fields
-    must be encoded as base64.
+    A list of nodes to ignore during path finding.
     */
     repeated bytes ignored_nodes = 6;
 
@@ -2357,7 +2519,7 @@ message QueryRoutesRequest {
     The source node where the request route should originated from. If empty,
     self is assumed.
     */
-    string source_pub_key = 8;
+    bytes source_pub_key = 8;
 
     /*
     If set to true, edge probabilities from mission control will be used to get
@@ -2382,8 +2544,7 @@ message QueryRoutesRequest {
     to a peer which understands the new records. This can be used to pass
     application specific data during the payment attempt. If the destination
     does not support the specified recrods, and error will be returned.
-    Record types are required to be in the custom range >= 65536. When using
-    REST, the values must be encoded as base64.
+    Record types are required to be in the custom range >= 65536.
     */
     map<uint64, bytes> dest_custom_records = 13;
 
@@ -2415,14 +2576,12 @@ message QueryRoutesRequest {
 
 message NodePair {
     /*
-    The sending node of the pair. When using REST, this field must be encoded as
-    base64.
+    The sending node of the pair.
     */
     bytes from = 1;
 
     /*
-    The receiving node of the pair. When using REST, this field must be encoded
-    as base64.
+    The receiving node of the pair.
     */
     bytes to = 2;
 }
@@ -2564,8 +2723,8 @@ message Route {
 }
 
 message NodeInfoRequest {
-    // The 33-byte hex-encoded compressed public of the target node
-    string pub_key = 1;
+    // The 33-byte compressed public of the target node
+    bytes pub_key = 1;
 
     // If true, will include all known channels associated with the node.
     bool include_channels = 2;
@@ -2598,7 +2757,9 @@ each outgoing edge.
 */
 message LightningNode {
     uint32 last_update = 1;
-    string pub_key = 2;
+
+    // The public key of the node
+    bytes pub_key = 2;
     string alias = 3;
     repeated NodeAddress addresses = 4;
     string color = 5;
@@ -2638,8 +2799,8 @@ message ChannelEdge {
 
     uint32 last_update = 3 [deprecated = true];
 
-    string node1_pub = 4;
-    string node2_pub = 5;
+    bytes node1_pub = 4;
+    bytes node2_pub = 5;
 
     int64 capacity = 6;
 
@@ -2777,7 +2938,7 @@ message ClosedChannelUpdate {
 
 message HopHint {
     // The public key of the node at the start of the channel.
-    string node_id = 1;
+    bytes node_id = 1;
 
     // The unique identifier of the channel.
     uint64 chan_id = 2 [jstype = JS_STRING];
@@ -2815,15 +2976,12 @@ message Invoice {
     reserved 2;
 
     /*
-    The hex-encoded preimage (32 byte) which will allow settling an incoming
-    HTLC payable to this preimage. When using REST, this field must be encoded
-    as base64.
+    The 32 byte preimage which will allow settling an incoming HTLC.
     */
     bytes r_preimage = 3;
 
     /*
-    The hash of the preimage. When using REST, this field must be encoded as
-    base64.
+    The hash of the preimage.
     */
     bytes r_hash = 4;
 
@@ -2860,8 +3018,7 @@ message Invoice {
     /*
     Hash (SHA-256) of a description of the payment. Used if the description of
     payment (memo) is too long to naturally fit within the description field
-    of an encoded payment request. When using REST, this field must be encoded
-    as base64.
+    of an encoded payment request.
     */
     bytes description_hash = 10;
 
@@ -2899,8 +3056,7 @@ message Invoice {
     */
     uint64 settle_index = 17;
 
-    // Deprecated, use amt_paid_sat or amt_paid_msat.
-    int64 amt_paid = 18 [deprecated = true];
+    reserved 18;
 
     /*
     The amount that was accepted for this invoice, in satoshis. This will ONLY
@@ -2992,7 +3148,7 @@ message AddInvoiceResponse {
     /*
     A bare-bones invoice for a payment within the Lightning Network. With the
     details of the invoice, the sender has all the data necessary to send a
-    payment to the recipient.
+    payment to the recipient. Represented as bech32 encoding.
     */
     string payment_request = 2;
 
@@ -3005,17 +3161,10 @@ message AddInvoiceResponse {
     uint64 add_index = 16;
 }
 message PaymentHash {
-    /*
-    The hex-encoded payment hash of the invoice to be looked up. The passed
-    payment hash must be exactly 32 bytes, otherwise an error is returned.
-    Deprecated now that the REST gateway supports base64 encoding of bytes
-    fields.
-    */
-    string r_hash_str = 1 [deprecated = true];
+    reserved 1;
 
     /*
-    The payment hash of the invoice to be looked up. When using REST, this field
-    must be encoded as base64.
+    The payment hash of the invoice to be looked up.
     */
     bytes r_hash = 2;
 }
@@ -3130,7 +3279,7 @@ message Payment {
     int64 fee = 5 [deprecated = true];
 
     // The payment preimage
-    string payment_preimage = 6;
+    bytes payment_preimage = 6;
 
     // The value of the payment in satoshis
     int64 value_sat = 7;
@@ -3276,13 +3425,13 @@ message PayReqString {
     string pay_req = 1;
 }
 message PayReq {
-    string destination = 1;
-    string payment_hash = 2;
+    bytes destination = 1;
+    bytes payment_hash = 2;
     int64 num_satoshis = 3;
     int64 timestamp = 4;
     int64 expiry = 5;
     string description = 6;
-    string description_hash = 7;
+    bytes description_hash = 7;
     string fallback_addr = 8;
     int64 cltv_expiry = 9;
     repeated RouteHint route_hints = 10;
@@ -3469,8 +3618,7 @@ message ChannelBackup {
     /*
     Is an encrypted single-chan backup. this can be passed to
     RestoreChannelBackups, or the WalletUnlocker Init and Unlock methods in
-    order to trigger the recovery protocol. When using REST, this field must be
-    encoded as base64.
+    order to trigger the recovery protocol.
     */
     bytes chan_backup = 2;
 }
@@ -3484,8 +3632,7 @@ message MultiChanBackup {
     /*
     A single encrypted blob containing all the static channel backups of the
     channel listed above. This can be stored as a single file or blob, and
-    safely be replaced with any prior/future versions. When using REST, this
-    field must be encoded as base64.
+    safely be replaced with any prior/future versions.
     */
     bytes multi_chan_backup = 2;
 }
@@ -3521,8 +3668,7 @@ message RestoreChanBackupRequest {
         ChannelBackups chan_backups = 1;
 
         /*
-        The channels to restore in the packed multi backup format. When using
-        REST, this field must be encoded as base64.
+        The channels to restore in the packed multi backup format.
         */
         bytes multi_chan_backup = 2;
     }
@@ -3534,56 +3680,6 @@ message ChannelBackupSubscription {
 }
 
 message VerifyChanBackupResponse {
-}
-
-message MacaroonPermission {
-    // The entity a permission grants access to.
-    string entity = 1;
-
-    // The action that is granted.
-    string action = 2;
-}
-message BakeMacaroonRequest {
-    // The list of permissions the new macaroon should grant.
-    repeated MacaroonPermission permissions = 1;
-
-    // The root key ID used to create the macaroon, must be a positive integer.
-    uint64 root_key_id = 2;
-}
-message BakeMacaroonResponse {
-    // The hex encoded macaroon, serialized in binary format.
-    string macaroon = 1;
-}
-
-message ListMacaroonIDsRequest {
-}
-message ListMacaroonIDsResponse {
-    // The list of root key IDs that are in use.
-    repeated uint64 root_key_ids = 1;
-}
-
-message DeleteMacaroonIDRequest {
-    // The root key ID to be removed.
-    uint64 root_key_id = 1;
-}
-message DeleteMacaroonIDResponse {
-    // A boolean indicates that the deletion is successful.
-    bool deleted = 1;
-}
-
-message MacaroonPermissionList {
-    // A list of macaroon permissions.
-    repeated MacaroonPermission permissions = 1;
-}
-
-message ListPermissionsRequest {
-}
-message ListPermissionsResponse {
-    /*
-    A map between all RPC method URIs and their required macaroon permissions to
-    access them.
-    */
-    map<string, MacaroonPermissionList> method_permissions = 1;
 }
 
 message Failure {
@@ -3749,13 +3845,263 @@ message ChannelUpdate {
     bytes extra_opaque_data = 12;
 }
 
-message MacaroonId {
-    bytes nonce = 1;
-    bytes storageId = 2;
-    repeated Op ops = 3;
-}
-
 message Op {
     string entity = 1;
     repeated string actions = 2;
+}
+
+message ReSyncChainRequest {
+    int32 from_height = 1;
+    int32 to_height = 2;
+    repeated string addresses = 3;
+    bool drop_db = 4;
+}
+
+message ReSyncChainResponse {
+}
+
+message StopReSyncRequest{}
+
+message StopReSyncResponse{
+    string value = 1;
+}
+
+message GetWalletSeedRequest{}
+
+message GetWalletSeedResponse{
+    repeated string seed = 1;
+}
+
+message ChangeSeedPassphraseRequest{
+    /*
+    current_seed_passphrase is the optional user specified passphrase that
+    encrypts the current seed.
+    */
+    string current_seed_passphrase = 1;
+
+    /*
+    current_seed_passphrase_bin overrides current_seed_passphrase if specified,
+    for binary representation of the current seed passphrase. If using JSON then
+    this field must be base64 encoded.
+    */
+    bytes current_seed_passphrase_bin = 2;
+
+    /*
+    current_seed is the seed whose passphrase is going to be changed
+    */
+    repeated string current_seed = 3;
+
+    /*
+    new_seed_passphrase is the optional user specified passphrase that will be used
+    to encrypt the seed.
+    */
+    string new_seed_passphrase = 4;
+
+    /*
+    new_seed_passphrase_bin overrides new_seed_passphrase if specified, for binary
+    representation of the passphrase. If using JSON then this field must be base64
+    encoded.
+    */
+    bytes new_seed_passphrase_bin = 5;
+}
+
+message ChangeSeedPassphraseResponse{
+    repeated string seed = 1;
+}
+
+message GetSecretRequest{
+    string name = 1;
+}
+
+message GetSecretResponse{
+    string secret = 1;
+}
+
+message ImportPrivKeyRequest{
+    string private_key = 1;
+    bool rescan = 2;
+    bool legacy = 3;
+}
+
+message ImportPrivKeyResponse{
+    string address = 1;
+}
+
+message ListLockUnspentRequest{}
+
+message ListLockUnspentResponse{
+    repeated string locked_unspent = 1;
+}
+
+message LockUnspentTransaction {
+    string txid = 1;
+    int32 vout = 2;
+}
+message LockUnspentRequest{
+    bool unlock = 1;
+    repeated LockUnspentTransaction transactions = 2;
+    string lockname = 3;
+}
+
+message LockUnspentResponse{
+    bool result = 1;
+}
+
+message CreateTransactionRequest{
+    // Address which we will be paying to
+    string to_address = 1;
+
+    // Number of PKT to send
+    double amount = 2;
+
+    // Addresses which can be selected for sourcing funds from
+    repeated string from_address = 3;
+
+    // Output an electrum format transaction
+    bool electrum_format = 4;
+    string change_address = 5;
+    int32 input_min_height = 6;
+    int32 min_conf = 7;
+    bool vote = 8;
+    int32 max_inputs = 9;
+    string autolock = 10;
+    bool sign = 11;
+}
+
+message CreateTransactionResponse{
+    bytes transaction = 1;
+}
+
+message DumpPrivKeyRequest{
+    string address = 1;
+}
+
+message DumpPrivKeyResponse{
+    string private_key = 1;
+}
+
+message GetNewAddressRequest{
+    bool legacy = 1;
+}
+
+message GetNewAddressResponse{
+    string address = 1;
+}
+
+message GetTransactionRequest{
+    string txid = 1;
+    bool includewatchonly = 2;
+}
+
+message GetTransactionDetailsResult {
+    string address = 1;
+    double amount = 2;
+    string category = 3;
+    uint32 vout = 4;
+    uint64 amount_units = 5;
+}
+
+message TransactionResult{
+    double amount = 1;
+    uint64 amount_units = 2;
+    double fee = 3;
+    uint64 fee_units = 4;
+    int64 confirmations = 5;
+    string block_hash = 6;
+    int64 block_index = 7;
+    int64 block_time = 8;
+    string txid = 9;
+    repeated string wallet_conflicts = 10;
+    int64 time = 11;
+    int64 time_received = 12;
+    repeated GetTransactionDetailsResult details = 13;
+    bytes raw = 14;
+}
+
+message GetTransactionResponse{
+    TransactionResult transaction = 1;
+}
+
+message GetNetworkStewardVoteRequest{}
+
+message GetNetworkStewardVoteResponse{
+    string vote_against = 1;
+    string vote_for = 2;
+}
+
+message SetNetworkStewardVoteRequest{
+    string vote_against = 1;
+    string vote_for = 2;
+}
+
+message SetNetworkStewardVoteResponse{}
+
+message BcastTransactionRequest{
+    bytes tx = 1;
+}
+
+message BcastTransactionResponse{
+    string txn_hash = 1;
+}
+
+message SendFromRequest{
+    string to_address = 1;
+    double amount = 2;
+    repeated string from_address = 3;
+    int32 min_conf = 4;
+    int32 max_inputs = 5;
+    int32 min_height = 6;
+}
+
+message SendFromResponse{
+    string tx_hash = 1;
+}
+
+message DecodeRawTransactionRequest{
+    string hex_tx = 1;
+    bool vin_extra = 2;
+}
+message ScriptSig {
+    string asm = 1;
+    string hex = 2;
+}
+
+message PrevOut{
+    string address = 1;
+    double value_coins = 2;
+    string svalue = 3;
+}
+
+message VinPrevOut {
+    string coinbase = 1;
+    string txid = 2;
+    uint32 vout = 3;
+    ScriptSig script_sig = 4;
+    uint32 sequence = 5;
+    repeated string witness = 6;
+    PrevOut prev_out = 7;
+}
+
+message Vote{
+    string for = 1;
+    string against = 2;
+}
+
+message Vout {
+    double value_coins = 1;
+    string svalue = 2;
+    uint32 n = 3;
+    string address = 4;
+    Vote vote = 5;
+}
+
+message DecodeRawTransactionResponse{
+    string txid = 1;
+    int32 version = 2;
+    uint32 locktime = 3;
+    string sfee = 4;
+    int32 size = 5;
+    int32 vsize = 6;
+    repeated VinPrevOut vin = 7;
+    repeated Vout vout = 8;
 }

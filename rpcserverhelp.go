@@ -296,6 +296,7 @@ var helpDescsEnUS = map[string]string{
 	"getblockverboseresult-networksteward":           "The address of the current network steward, if using the PKT chain or one which has one",
 	"getblockverboseresult-blocksuntilretarget":      "The number of blocks until the next difficulty retarget",
 	"getblockverboseresult-retargetestimate":         "A number which multiplied by the current difficulty gives the extimated next difficulty",
+	"getblockverboseresult-packetcryptorigannwork":   "The amount of work that was done on the announcement at the time when it was new",
 
 	// GetBlockCountCmd help.
 	"getblockcount--synopsis": "Returns the number of blocks in the longest block chain.",

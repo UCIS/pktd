@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkt-cash/pktd/btcutil/util"
 	"github.com/pkt-cash/pktd/pktwallet/wallet/seedwords"
+	"github.com/stretchr/testify/require"
 )
 
 func TestEncrypt(t *testing.T) {
@@ -29,4 +31,33 @@ func TestEncrypt(t *testing.T) {
 	} else if !bytes.Equal(seed1.Bytes(), seed.Bytes()) {
 		t.Error("Seed decrypt is not the same")
 	}
+}
+
+//	Test to check if a result seed get by deciphering a seed keeps the original attributes:w
+func TestReversibleEncrypt(t *testing.T) {
+
+	t.Run("decipher a ciphered seed using the mnemonic", func(t *testing.T) {
+
+		//	create a new seed
+		seed, err := seedwords.RandomSeed()
+		util.RequireNoErr(t, err)
+
+		//	cipher the seed
+		cipherPass := []byte("kek")
+		cipheredSeed := seed.Encrypt(cipherPass)
+
+		//	get the mnemonic for the cyphered seed
+		mnemonic, err := cipheredSeed.Words("english")
+		util.RequireNoErr(t, err)
+
+		//	try to reverse
+		seedEnc, err := seedwords.SeedFromWords(mnemonic)
+		util.RequireNoErr(t, err)
+
+		decipheredSeed, err := seedEnc.Decrypt(cipherPass, false)
+
+		//	load the configuration file
+		require.Equal(t, seed.Version(), decipheredSeed.Version())
+		require.Equal(t, seed.Birthday(), decipheredSeed.Birthday())
+	})
 }

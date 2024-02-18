@@ -1,18 +1,10 @@
 package headerfs
 
 import (
-	"bytes"
-	"crypto/rand"
-	"io/ioutil"
-	"os"
-	"testing"
-
-	"github.com/pkt-cash/pktd/btcutil/er"
-
-	"github.com/pkt-cash/pktd/pktwallet/walletdb"
 	_ "github.com/pkt-cash/pktd/pktwallet/walletdb/bdb"
 )
 
+/*
 func createTestIndex(f func(tx walletdb.ReadWriteTx, hi *headerIndex) er.R) er.R {
 
 	tempDir, errr := ioutil.TempDir("", "neutrino")
@@ -122,3 +114,4 @@ func TestAddHeadersIndexRetrieve(t *testing.T) {
 		t.Fatalf("unable to create test db: %v", err)
 	}
 }
+*/

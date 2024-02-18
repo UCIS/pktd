@@ -129,6 +129,9 @@ type Address interface {
 	// IsForNet returns whether or not the address is associated with the
 	// passed bitcoin network.
 	IsForNet(*chaincfg.Params) bool
+
+	// IsSegwit tells if the address is a segwit style address or legacy.
+	IsSegwit() bool
 }
 
 // DecodeAddress decodes the string encoding of an address and returns
@@ -327,6 +330,10 @@ func (a *AddressPubKeyHash) Hash160() *[Hash160Size]byte {
 	return &a.hash
 }
 
+func (a *AddressPubKeyHash) IsSegwit() bool {
+	return false
+}
+
 // AddressScriptHash is an Address for a pay-to-script-hash (P2SH)
 // transaction.
 type AddressScriptHash struct {
@@ -392,6 +399,10 @@ func (a *AddressScriptHash) String() string {
 // keys).
 func (a *AddressScriptHash) Hash160() *[Hash160Size]byte {
 	return &a.hash
+}
+
+func (a *AddressScriptHash) IsSegwit() bool {
+	return false
 }
 
 // PubKeyFormat describes what format to use for a pay-to-pubkey address.
@@ -492,6 +503,10 @@ func (a *AddressPubKey) IsForNet(net *chaincfg.Params) bool {
 // address.  This is not the same as calling EncodeAddress.
 func (a *AddressPubKey) String() string {
 	return hex.EncodeToString(a.serialize())
+}
+
+func (a *AddressPubKey) IsSegwit() bool {
+	return false
 }
 
 // AddressPubKeyHash returns the pay-to-pubkey address converted to a
@@ -602,6 +617,10 @@ func (a *AddressWitnessPubKeyHash) Hash160() *[20]byte {
 	return &a.witnessProgram
 }
 
+func (a *AddressWitnessPubKeyHash) IsSegwit() bool {
+	return true
+}
+
 // AddressWitnessScriptHash is an Address for a pay-to-witness-script-hash
 // (P2WSH) output. See BIP 173 for further details regarding native segregated
 // witness address encoding:
@@ -687,6 +706,10 @@ func (a *AddressWitnessScriptHash) WitnessProgram() []byte {
 	return a.witnessProgram[:]
 }
 
+func (a *AddressWitnessScriptHash) IsSegwit() bool {
+	return true
+}
+
 // AddressNonStandard is an Address representation of a script of any type.
 // It it textually represented as "script:" followed by a base64 representation
 // of the pkScript itself.
@@ -718,4 +741,9 @@ func (a *AddressNonStandard) ScriptAddress() []byte {
 // true.
 func (a *AddressNonStandard) IsForNet(*chaincfg.Params) bool {
 	return true
+}
+
+// We don't know
+func (a *AddressNonStandard) IsSegwit() bool {
+	return false
 }

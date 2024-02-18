@@ -244,7 +244,7 @@ func (s *UtxoScanner) batchManager() {
 		// Initiate a scan, starting from the birth height of the
 		// least-height request currently in the queue.
 		err := s.scanFromHeight(req.BirthHeight)
-		if err != nil {
+		if err != nil && !er.IsLoopBreak(err) {
 			log.Errorf("utxo scan failed: %v", err)
 		}
 	}

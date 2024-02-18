@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
+	"github.com/pkt-cash/pktd/connmgr/banmgr"
+	"github.com/pkt-cash/pktd/pktlog/log"
 	"github.com/pkt-cash/pktd/txscript/opcode"
 
 	"github.com/pkt-cash/pktd/btcutil/gcs"
@@ -20,7 +22,6 @@ import (
 	"github.com/pkt-cash/pktd/chaincfg"
 	"github.com/pkt-cash/pktd/chaincfg/chainhash"
 	"github.com/pkt-cash/pktd/chaincfg/genesis"
-	"github.com/pkt-cash/pktd/neutrino/banman"
 	"github.com/pkt-cash/pktd/neutrino/blockntfns"
 	"github.com/pkt-cash/pktd/neutrino/headerfs"
 	"github.com/pkt-cash/pktd/peer"
@@ -32,71 +33,70 @@ import (
 // maxHeight is the height we will generate filter headers up to.
 const maxHeight = 20 * uint32(wire.CFCheckptInterval)
 
+var walletDb walletdb.DB
+
 // setupBlockManager initialises a blockManager to be used in tests.
-func setupBlockManager() (*blockManager, headerfs.BlockHeaderStore,
-	*headerfs.FilterHeaderStore, func(), er.R) {
+func setupBlockManager() (*blockManager, *headerfs.NeutrinoDBStore, func(), er.R) {
 
 	// Set up the block and filter header stores.
 	tempDir, errr := ioutil.TempDir("", "neutrino")
 	if errr != nil {
-		return nil, nil, nil, nil, er.Errorf("Failed to create "+
+		return nil, nil, nil, er.Errorf("Failed to create "+
 			"temporary directory: %s", errr)
 	}
 
 	db, err := walletdb.Create("bdb", tempDir+"/weks.db", true)
 	if err != nil {
 		os.RemoveAll(tempDir)
-		return nil, nil, nil, nil, er.Errorf("Error opening DB: %s",
+		return nil, nil, nil, er.Errorf("Error opening DB: %s",
 			err)
 	}
-
+	walletDb = db
 	cleanUp := func() {
 		db.Close()
 		os.RemoveAll(tempDir)
 	}
 
-	hdrStore, err := headerfs.NewBlockHeaderStore(
+	store, err := headerfs.NewNeutrinoDBStore(
 		db, &chaincfg.SimNetParams,
+		true,
 	)
 	if err != nil {
 		cleanUp()
-		return nil, nil, nil, nil, er.Errorf("Error creating block "+
+		return nil, nil, nil, er.Errorf("Error creating block "+
 			"header store: %s", err)
 	}
 
-	cfStore, err := headerfs.NewFilterHeaderStore(
-		db, &chaincfg.SimNetParams, nil, hdrStore,
-	)
 	if err != nil {
 		cleanUp()
-		return nil, nil, nil, nil, er.Errorf("Error creating filter "+
+		return nil, nil, nil, er.Errorf("Error creating filter "+
 			"header store: %s", err)
 	}
 
+	/*TODO: change perhaps to return banMgr
 	banStore, err := banman.NewStore(db)
 	if err != nil {
 		cleanUp()
-		return nil, nil, nil, nil, er.Errorf("unable to initialize "+
+		return nil, nil, nil, er.Errorf("unable to initialize "+
 			"ban store: %v", err)
-	}
+	}*/
 
 	// Set up a chain service for the block manager. Each test should set
 	// custom query methods on this chain service.
 	cs := &ChainService{
-		chainParams:      chaincfg.SimNetParams,
-		BlockHeaders:     hdrStore,
-		RegFilterHeaders: cfStore,
-		banStore:         banStore,
+		chainParams: chaincfg.SimNetParams,
+		NeutrinoDB:  store,
+		banMgr:      *banmgr.New(&banmgr.Config{}),
 	}
 
 	// Set up a blockManager with the chain service we defined.
 	bm, err := newBlockManager(cs, nil)
 	if err != nil {
-		return nil, nil, nil, nil, er.Errorf("unable to create "+
+		return nil, nil, nil, er.Errorf("unable to create "+
 			"blockmanager: %v", err)
 	}
 
-	return bm, hdrStore, cfStore, cleanUp, nil
+	return bm, store, cleanUp, nil
 }
 
 // headers wraps the different headers and filters used throughout the tests.
@@ -310,11 +310,11 @@ func TestBlockManagerInitialInterval(t *testing.T) {
 		testDesc := fmt.Sprintf("permute=%v, partial=%v, repeat=%v",
 			test.permute, test.partialInterval, test.repeat)
 
-		bm, hdrStore, cfStore, cleanUp, err := setupBlockManager()
+		bm, store, cleanUp, err := setupBlockManager()
 		if err != nil {
 			t.Fatalf("unable to set up ChainService: %v", err)
 		}
-		tx, err := cfStore.Db.BeginReadWriteTx()
+		tx, err := store.Db.BeginReadWriteTx()
 		if err != nil {
 			t.Fatalf("unable to start tx: %v", err)
 		}
@@ -328,12 +328,12 @@ func TestBlockManagerInitialInterval(t *testing.T) {
 		// Keep track of the filter headers and block headers. Since
 		// the genesis headers are written automatically when the store
 		// is created, we query it to add to the slices.
-		genesisBlockHeader, _, err := hdrStore.ChainTip1(tx)
+		genesisBlockHeader, _, err := store.BlockChainTip1(tx)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		genesisFilterHeader, _, err := cfStore.ChainTip1(tx)
+		genesisFilterHeader, _, err := store.FilterChainTip1(tx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -346,14 +346,14 @@ func TestBlockManagerInitialInterval(t *testing.T) {
 
 		// Write all block headers but the genesis, since it is already
 		// in the store.
-		if err = hdrStore.WriteHeaders(tx, headers.blockHeaders[1:]...); err != nil {
+		if err = store.WriteBlockHeaders(tx, headers.blockHeaders[1:]...); err != nil {
 			t.Fatalf("Error writing batch of headers: %s", err)
 		}
 
 		// We emulate the case where a few filter headers are already
 		// written to the store by writing 1/3 of the first interval.
 		if test.partialInterval {
-			err = cfStore.WriteHeaders(tx,
+			err = store.WriteFilterHeaders(tx,
 				headers.cfHeaders[1:wire.CFCheckptInterval/3]...,
 			)
 			if err != nil {
@@ -436,11 +436,11 @@ func TestBlockManagerInitialInterval(t *testing.T) {
 		// Call the get checkpointed cf headers method with the
 		// checkpoints we created to start the test.
 		bm.getCheckpointedCFHeaders(
-			headers.checkpoints, cfStore, wire.GCSFilterRegular,
+			headers.checkpoints, *store, wire.GCSFilterRegular,
 		)
 
 		// Finally make sure the filter header tip is what we expect.
-		tip, tipHeight, err := cfStore.ChainTip()
+		tip, tipHeight, err := store.FilterChainTip()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -548,11 +548,11 @@ func TestBlockManagerInvalidInterval(t *testing.T) {
 	}
 
 	for _, test := range testCases {
-		bm, hdrStore, cfStore, cleanUp, err := setupBlockManager()
+		bm, store, cleanUp, err := setupBlockManager()
 		if err != nil {
 			t.Fatalf("unable to set up ChainService: %v", err)
 		}
-		tx, err := cfStore.Db.BeginReadWriteTx()
+		tx, err := store.Db.BeginReadWriteTx()
 		if err != nil {
 			t.Fatalf("unable start tx: %v", err)
 		}
@@ -576,12 +576,12 @@ func TestBlockManagerInvalidInterval(t *testing.T) {
 		// Keep track of the filter headers and block headers. Since
 		// the genesis headers are written automatically when the store
 		// is created, we query it to add to the slices.
-		genesisBlockHeader, _, err := hdrStore.ChainTip1(tx)
+		genesisBlockHeader, _, err := store.BlockChainTip1(tx)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		genesisFilterHeader, _, err := cfStore.ChainTip1(tx)
+		genesisFilterHeader, _, err := store.FilterChainTip1(tx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -609,14 +609,14 @@ func TestBlockManagerInvalidInterval(t *testing.T) {
 
 		// Write all block headers but the genesis, since it is already
 		// in the store.
-		if err = hdrStore.WriteHeaders(tx, headers.blockHeaders[1:]...); err != nil {
+		if err = store.WriteBlockHeaders(tx, headers.blockHeaders[1:]...); err != nil {
 			t.Fatalf("Error writing batch of headers: %s", err)
 		}
 
 		// We emulate the case where a few filter headers are already
 		// written to the store by writing 1/3 of the first interval.
 		if test.partialInterval {
-			err = cfStore.WriteHeaders(tx,
+			err = store.WriteFilterHeaders(tx,
 				headers.cfHeaders[1:wire.CFCheckptInterval/3]...,
 			)
 			if err != nil {
@@ -720,7 +720,7 @@ func TestBlockManagerInvalidInterval(t *testing.T) {
 		// Start the test by calling the get checkpointed cf headers
 		// method with the checkpoints we created.
 		bm.getCheckpointedCFHeaders(
-			headers.checkpoints, cfStore, wire.GCSFilterRegular,
+			headers.checkpoints, *store, wire.GCSFilterRegular,
 		)
 	}
 }
@@ -816,16 +816,18 @@ var _ QueryAccess = (*mockQueryAccess)(nil)
 // TestBlockManagerDetectBadPeers checks that we detect bad peers, like peers
 // not responding to our filter query, serving inconsistent filters etc.
 func TestBlockManagerDetectBadPeers(t *testing.T) {
+	log.Debugf(">>>>> Running test TestBlockManagerDetectBadPeers()")
+
 	var (
-		stopHash        = chainhash.Hash{}
-		prev            = chainhash.Hash{}
-		startHeight     = uint32(100)
-		badIndex        = uint32(5)
-		targetIndex     = startHeight + badIndex
-		fType           = wire.GCSFilterRegular
-		filterBytes, _  = correctFilter.NBytes()
-		filterHash, _   = builder.GetFilterHash(correctFilter)
-		blockHeader     = wire.BlockHeader{}
+		stopHash       = chainhash.Hash{}
+		prev           = chainhash.Hash{}
+		startHeight    = uint32(100)
+		badIndex       = uint32(5)
+		targetIndex    = startHeight + badIndex
+		fType          = wire.GCSFilterRegular
+		filterBytes, _ = correctFilter.NBytes()
+		filterHash, _  = builder.GetFilterHash(correctFilter)
+		//blockHeader     = wire.BlockHeader{}
 		targetBlockHash = block.BlockHash()
 
 		peers  = []string{"good1:1", "good2:1", "bad:1", "good3:1"}
@@ -875,14 +877,83 @@ func TestBlockManagerDetectBadPeers(t *testing.T) {
 		},
 	}
 
-	for _, test := range testCases {
-		// Create a mock block header store. We only need to be able to
-		// serve a header for the target index.
-		blockHeaders := newMockBlockHeaderStore()
-		blockHeaders.heights[targetIndex] = blockHeader
-		cs := &ChainService{
-			BlockHeaders: blockHeaders,
+	// Set up the block and filter header stores.
+	tempDir, errr := ioutil.TempDir("", "neutrino")
+	if errr != nil {
+		t.Fatalf("failed to crete temporary directory: %s", errr)
+	}
+	defer os.RemoveAll(tempDir)
+
+	db, err := walletdb.Create("bdb", tempDir+"/weks.db", true)
+	if err != nil {
+		os.RemoveAll(tempDir)
+		t.Fatalf("Error opening DB: %s", err)
+	}
+	walletDb = db
+	defer db.Close()
+
+	// Create a mock block header store. We only need to be able to
+	// serve a header for the target index.
+	neutrinoDb, err := headerfs.NewNeutrinoDBStore(walletDb, &chaincfg.MainNetParams, true)
+	if err != nil {
+		t.Fatalf("failed to crete new NeutrinoDB: %v", err)
+	}
+	//neutrinoDb.blockHeaderIndex.heights[targetIndex] = blockHeader
+
+	// Set up a chain service for the block manager. Each test should set
+	// custom query methods on this chain service.
+	cs := &ChainService{
+		chainParams: chaincfg.SimNetParams,
+		NeutrinoDB:  neutrinoDb,
+		banMgr:      *banmgr.New(&banmgr.Config{}),
+	}
+
+	//	begin a write TX
+	tx, err := db.BeginReadWriteTx()
+	if err != nil {
+		t.Fatalf("unable to start tx: %v", err)
+	}
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
 		}
+	}()
+
+	// Keep track of the filter headers and block headers. Since
+	// the genesis headers are written automatically when the store
+	// is created, we query it to add to the slices.
+	genesisBlockHeader, _, err := neutrinoDb.BlockChainTip1(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	genesisFilterHeader, _, err := neutrinoDb.FilterChainTip1(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testHeaders, err := generateHeaders(genesisBlockHeader, genesisFilterHeader, nil)
+	if err != nil {
+		t.Fatalf("unable to generate headers: %v", err)
+	}
+
+	// Write all block headers but the genesis, since it is already
+	// in the store.
+	if err = neutrinoDb.WriteBlockHeaders(tx, testHeaders.blockHeaders[1:]...); err != nil {
+		t.Fatalf("Error writing batch of headers: %s", err)
+	}
+
+	tx.Commit()
+
+	// Get the block header for targetIndex height, because it's hash is necessary to create the mock query
+	header, err := neutrinoDb.FetchBlockHeaderByHeight(targetIndex)
+	if err != nil {
+		t.Fatalf("Error fetching header from DB: %s", err)
+	}
+	targetBlockHash = header.BlockHash()
+
+	for i, test := range testCases {
+		log.Debugf(">>>>> test case: %d", i)
 
 		// We set up the mock QueryAccess to only respond according to
 		// the active testcase.
@@ -910,6 +981,7 @@ func TestBlockManagerDetectBadPeers(t *testing.T) {
 			headers[peer] = msg
 		}
 
+		// Set up a blockManager with the chain service we defined.
 		bm := &blockManager{
 			server:  cs,
 			queries: mock,
@@ -922,6 +994,10 @@ func TestBlockManagerDetectBadPeers(t *testing.T) {
 		)
 		if err != nil {
 			t.Fatalf("failed to detect bad peers: %v", err)
+		}
+
+		for _, bad := range badPeers {
+			log.Debugf(">>>>> bad peer detected: %s", bad)
 		}
 
 		if err := assertBadPeers(expBad, badPeers); err != nil {

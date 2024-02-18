@@ -165,9 +165,7 @@ type ListUnspentResult struct {
 	TxID          string  `json:"txid"`
 	Vout          uint32  `json:"vout"`
 	Address       string  `json:"address"`
-	Account       string  `json:"account"`
 	ScriptPubKey  string  `json:"scriptPubKey"`
-	RedeemScript  string  `json:"redeemScript,omitempty"`
 	Amount        float64 `json:"amount"`
 	Confirmations int64   `json:"confirmations"`
 	Height        int64   `json:"height"`
@@ -225,6 +223,21 @@ type GetNetworkStewardVoteResult struct {
 	VoteAgainst string `json:"voteagainst,omitempty"`
 }
 
+type AddressVoteInfo struct {
+	// True this the address has indicated it's candidacy in the most recent vote
+	IsCandidate bool `json:"is_candidate,omitempty"`
+	// Who the address voted for, empty string if they voted for themselves or nobody
+	VoteFor string `json:"vote_for,omitempty"`
+	// The transaction ID of the vote
+	VoteTxid string `json:"vote_txid,omitempty"`
+	// The number of the block where this address voted
+	VoteBlock int32 `json:"vote_block,omitempty"`
+	// The block at which the vote will expire
+	ExpirationBlock int32 `json:"expiration_block,omitempty"`
+	// The estimated date/time when the vote will expire (as seconds since the epoch)
+	EstimatedExpirationSec int64 `json:"estimated_expiration_sec,omitempty"`
+}
+
 type GetAddressBalancesResult struct {
 	Address string `json:"address"`
 
@@ -241,6 +254,8 @@ type GetAddressBalancesResult struct {
 	Sunconfirmed string  `json:"sunconfirmed"`
 
 	OutputCount int32 `json:"outputcount"`
+
+	Vote *AddressVoteInfo `json:"vote,omitempty"`
 }
 
 type MaintenanceStats struct {

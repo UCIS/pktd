@@ -71,19 +71,29 @@ func testQueryRoutes(t *testing.T, useMissionControl bool, useMsat bool) {
 		t.Fatal(err)
 	}
 
+	nodeIdBytes, err := util.DecodeHex(hintNodeKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	rpcRouteHints := []*lnrpc.RouteHint{
 		{
 			HopHints: []*lnrpc.HopHint{
 				{
 					ChanId: 38484,
-					NodeId: hintNodeKey,
+					NodeId: nodeIdBytes,
 				},
 			},
 		},
 	}
 
+	pubKeyBytes, err := util.DecodeHex(destKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	request := &lnrpc.QueryRoutesRequest{
-		PubKey:         destKey,
+		PubKey:         pubKeyBytes,
 		FinalCltvDelta: 100,
 		IgnoredNodes:   [][]byte{ignoreNodeBytes},
 		IgnoredEdges: []*lnrpc.EdgeLocator{{

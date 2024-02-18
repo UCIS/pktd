@@ -654,6 +654,12 @@ var (
 				"soa.nodes.lightning.directory",
 			},
 		},
+
+		*PktMainNetParams.GenesisHash: {
+			{
+				"pkt.lseed.cjd.li",
+			},
+		},
 	}
 )
 

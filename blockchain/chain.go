@@ -1491,8 +1491,8 @@ func (b *BlockChain) HeightToHashRange(startHeight int32,
 		return nil, er.Errorf("start height (%d) is below 0", startHeight)
 	}
 	if startHeight > endHeight {
-		return nil, er.Errorf("start height (%d) is past end height (%d)",
-			startHeight, endHeight)
+		return nil, er.Errorf("start height (%d) is past end [%s@%d]",
+			startHeight, endNode.hash.String(), endHeight)
 	}
 
 	resultsLength := int(endHeight - startHeight + 1)
