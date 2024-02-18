@@ -7,6 +7,7 @@ package bdb
 import (
 	"io"
 	"os"
+	"time"
 
 	"github.com/pkt-cash/pktd/btcutil/er"
 
@@ -408,6 +409,6 @@ func openDB(dbPath string, create, noFreeListSync bool) (walletdb.DB, er.R) {
 		return nil, walletdb.ErrDbDoesNotExist.Default()
 	}
 
-	boltDB, err := bbolt.Open(dbPath, 0600, nil)
+	boltDB, err := bbolt.Open(dbPath, 0600, &bbolt.Options{Timeout: 1 * time.Second})
 	return (*db)(boltDB), convertErr(err)
 }
