@@ -125,7 +125,6 @@ func main() {
 		os.Setenv(a[0:i], a[i+1:])
 	}
 
-	build("pktd", ".", &conf)
 	build("pktwallet", "./pktwallet", &conf)
 	build("pktctl", "./cmd/pktctl", &conf)
 	build("checksig", "./cmd/checksig", &conf)
